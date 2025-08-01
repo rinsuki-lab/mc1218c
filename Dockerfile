@@ -18,6 +18,12 @@ RUN mkdir plugins
 COPY ./create-symlinks.sh /tmp/
 RUN /tmp/create-symlinks.sh
 
+FROM golang:1.24.5-alpine3.22 as prestop
+WORKDIR /app
+COPY go.mod go.sum ./
+COPY ./prestop ./prestop
+RUN go build -o /prestop ./prestop/
+
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
 ENV LANG=ja_JP.UTF-8
 
@@ -31,5 +37,6 @@ COPY --from=build /minecraft/cache ./cache
 COPY --from=build /minecraft/versions ./versions
 COPY --from=build /minecraft/plugins/*.jar ./plugins/
 COPY --from=build /minecraft/plugins/.paper-remapped ./plugins/.paper-remapped
+COPY --from=prestop /prestop /
 
 CMD ["paper.jar"]
