@@ -1,0 +1,11 @@
+name: MC1218C
+version: 1.0.0
+main: net.rinsuki.mcplugins.mc1218c.MyPlugin
+description: for my server
+author: rinsuki
+website: https://github.com/rinsuki-lab/mc1218c
+api-version: '1.21.8'
+commands:
+  snapshot:
+    description: Take snapshot backup immediately
+    usage: /<command>
