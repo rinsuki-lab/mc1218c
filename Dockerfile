@@ -18,11 +18,18 @@ RUN mkdir plugins
 COPY ./create-symlinks.sh /tmp/
 RUN /tmp/create-symlinks.sh
 
-FROM golang:1.24.5-alpine3.22 as prestop
+FROM golang:1.24.5-alpine3.22 as go-build
 WORKDIR /app
 COPY go.mod go.sum ./
+RUN go mod download
+
+FROM go-build as go-prestop
 COPY ./prestop ./prestop
 RUN go build -o /prestop ./prestop/
+
+FROM go-build as go-snapshotter
+COPY ./snapshotter ./snapshotter
+RUN go build -o /snapshotter ./snapshotter/
 
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
 ENV LANG=ja_JP.UTF-8
@@ -37,6 +44,7 @@ COPY --from=build /minecraft/cache ./cache
 COPY --from=build /minecraft/versions ./versions
 COPY --from=build /minecraft/plugins/*.jar ./plugins/
 COPY --from=build /minecraft/plugins/.paper-remapped ./plugins/.paper-remapped
-COPY --from=prestop /prestop /
+COPY --from=go-prestop /prestop /
+COPY --from=go-snapshotter /snapshotter /
 
 CMD ["paper.jar"]
