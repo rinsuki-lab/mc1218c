@@ -42,6 +42,9 @@ func main() {
 		log.Fatal("Failed to create socket:", err)
 	}
 	defer listener.Close()
+	if err := os.Chmod(SOCKET_PATH, 0777); err != nil {
+		log.Printf("Warning: failed to chmod socket: %v", err)
+	}
 
 	log.Printf("Listening on %s, source: %s, prefix: %s, regex: %s", SOCKET_PATH, src, prefix, pattern)
 
