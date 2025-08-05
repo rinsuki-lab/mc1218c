@@ -37,7 +37,7 @@ public class MyPlugin extends JavaPlugin implements Listener {
         try {
             // connect to @snapshot.sock
             SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX);
-            socket.connect(UnixDomainSocketAddress.of("@snapshot.sock"));
+            socket.connect(UnixDomainSocketAddress.of("/run/snapshotter/snapshot.sock"));
             
             // send the name to the socket
             ByteBuffer nameBuffer = ByteBuffer.wrap(name.getBytes(StandardCharsets.UTF_8));

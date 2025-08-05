@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const SOCKET_PATH = "@snapshot.sock"
+const SOCKET_PATH = "/run/snapshotter/snapshot.sock"
 
 func main() {
 	// Get source path from environment
