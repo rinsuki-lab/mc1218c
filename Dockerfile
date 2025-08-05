@@ -39,6 +39,10 @@ FROM go-build as go-snapshotter
 COPY ./snapshotter ./snapshotter
 RUN go build -o /snapshotter ./snapshotter/
 
+FROM alpine:3.22 AS snapshotter
+RUN apk add --no-cache btrfs-progs
+COPY --from=go-snapshotter /snapshotter /snapshotter
+
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
 ENV LANG=ja_JP.UTF-8
 
@@ -53,6 +57,5 @@ COPY --from=build /minecraft/versions ./versions
 COPY --from=build /minecraft/plugins/*.jar ./plugins/
 COPY --from=build /minecraft/plugins/.paper-remapped ./plugins/.paper-remapped
 COPY --from=go-prestop /prestop /
-COPY --from=go-snapshotter /snapshotter /
 
 CMD ["paper.jar"]
