@@ -7,14 +7,34 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
+import com.destroystokyo.paper.event.server.ServerTickStartEvent;
 
 public class MyPlugin extends JavaPlugin implements Listener {
+    private long lastTime = -1;
+
+    @Override
+    public void onEnable() {
+        Bukkit.getPluginManager().registerEvents(this, this);
+    }
+    
+    @EventHandler
+    public void onTickStarted(ServerTickStartEvent event) {
+        Server server = getServer();
+        long currentTime = server.getWorld("world").getFullTime() % 24000;
+        
+        if (lastTime != -1 && currentTime < lastTime) {
+            makeSnapshot(server.getConsoleSender());
+        }
+        lastTime = currentTime;
+    }
     
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
