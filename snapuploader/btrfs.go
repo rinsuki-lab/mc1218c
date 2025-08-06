@@ -100,6 +100,9 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 	var lastIncrementalSize int64 = 0
 	for i := len(snapshots) - 1; i >= 0; i-- {
 		snapshot := &snapshots[i]
+		if snapshot.HasDone && snapshot.BackupType == "full" {
+			return false // If full backup is latest snapshot, always create incremental backup
+		}
 		if snapshot.HasDone && snapshot.BackupType == "incremental" {
 			lastIncrementalSize = snapshot.Size
 			break
