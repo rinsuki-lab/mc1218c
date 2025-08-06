@@ -39,9 +39,17 @@ FROM go-build as go-snapshotter
 COPY ./snapshotter ./snapshotter
 RUN go build -o /snapshotter ./snapshotter/
 
+FROM go-build as go-snapuploader
+COPY ./snapuploader ./snapuploader
+RUN go build -o /snapuploader ./snapuploader/
+
 FROM alpine:3.22 AS snapshotter
 RUN apk add --no-cache btrfs-progs
 COPY --from=go-snapshotter /snapshotter /snapshotter
+
+FROM alpine:3.22 AS snapuploader
+RUN apk add --no-cache btrfs-progs zstd
+COPY --from=go-snapuploader /snapuploader /snapuploader
 
 FROM gcr.io/distroless/java21-debian12:debug-nonroot
 ENV LANG=ja_JP.UTF-8

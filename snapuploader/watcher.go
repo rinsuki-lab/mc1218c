@@ -1,0 +1,222 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
+)
+
+type CountingReader struct {
+	reader io.Reader
+	count  int64
+}
+
+func (cr *CountingReader) Read(p []byte) (n int, err error) {
+	n, err = cr.reader.Read(p)
+	cr.count += int64(n)
+	return n, err
+}
+
+type DirectoryWatcher struct {
+	watchDir string
+	watcher  *fsnotify.Watcher
+	config   *Config
+	uploader *S3Uploader
+}
+
+func NewDirectoryWatcher(cfg *Config, uploader *S3Uploader) (*DirectoryWatcher, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fsnotify watcher: %w", err)
+	}
+
+	return &DirectoryWatcher{
+		watchDir: cfg.WatchDir,
+		watcher:  watcher,
+		config:   cfg,
+		uploader: uploader,
+	}, nil
+}
+
+func (dw *DirectoryWatcher) Start(ctx context.Context) error {
+	// Add the watch directory
+	if err := dw.watcher.Add(dw.watchDir); err != nil {
+		return fmt.Errorf("failed to add watch directory: %w", err)
+	}
+
+	log.Printf("Started watching directory: %s", dw.watchDir)
+
+	// Process existing snapshots on startup
+	if err := dw.processExistingSnapshots(ctx); err != nil {
+		log.Printf("Error processing existing snapshots: %v", err)
+	}
+
+	// Start watching for new events
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-dw.watcher.Events:
+			if !ok {
+				return fmt.Errorf("watcher events channel closed")
+			}
+			dw.handleEvent(ctx, event)
+		case err, ok := <-dw.watcher.Errors:
+			if !ok {
+				return fmt.Errorf("watcher errors channel closed")
+			}
+			log.Printf("Watcher error: %v", err)
+		}
+	}
+}
+
+func (dw *DirectoryWatcher) handleEvent(ctx context.Context, event fsnotify.Event) {
+	// We're interested in new directories being created
+	if event.Op&fsnotify.Create == fsnotify.Create {
+		// Check if it's a directory
+		fileInfo, err := os.Stat(event.Name)
+		if err != nil {
+			log.Printf("Failed to stat %s: %v", event.Name, err)
+			return
+		}
+
+		// Only process directories
+		if !fileInfo.IsDir() {
+			return
+		}
+
+		// Wait a bit for the snapshot to be fully created
+		time.Sleep(5 * time.Second)
+
+		// Process the new snapshot
+		if err := dw.processSnapshot(ctx, event.Name); err != nil {
+			log.Printf("Error processing snapshot %s: %v", event.Name, err)
+		}
+	}
+}
+
+func (dw *DirectoryWatcher) processExistingSnapshots(ctx context.Context) error {
+	snapshots, err := FindSnapshots(dw.watchDir)
+	if err != nil {
+		return fmt.Errorf("failed to find snapshots: %w", err)
+	}
+
+	for _, snapshot := range snapshots {
+		if !snapshot.HasDone {
+			log.Printf("Found unprocessed snapshot: %s", snapshot.Name)
+			if err := dw.processSnapshot(ctx, snapshot.Path); err != nil {
+				log.Printf("Error processing snapshot %s: %v", snapshot.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath string) error {
+	log.Printf("Processing snapshot: %s", snapshotPath)
+
+	// Check if already processed
+	doneFile := filepath.Join(snapshotPath, ".done")
+	if _, err := os.Stat(doneFile); err == nil {
+		log.Printf("Snapshot already processed (has .done file): %s", snapshotPath)
+		return nil
+	}
+
+	// Find all snapshots
+	snapshots, err := FindSnapshots(dw.watchDir)
+	if err != nil {
+		return fmt.Errorf("failed to find snapshots: %w", err)
+	}
+
+	// Find parent snapshot (latest full backup)
+	parent := FindLatestParent(snapshots)
+	
+	// Determine if we should create a full backup
+	shouldCreateFull := ShouldCreateFullBackup(parent, snapshots)
+	
+	var parentPath *string
+	var parentName string
+	var backupType string
+	
+	if shouldCreateFull {
+		// Create full backup (no parent)
+		parentPath = nil
+		parentName = ""
+		backupType = "full"
+		log.Printf("Creating FULL backup (no parent)")
+	} else {
+		// Create incremental backup
+		if parent != nil {
+			parentPath = &parent.Path
+			parentName = parent.Name
+			backupType = "incremental"
+			log.Printf("Creating INCREMENTAL backup with parent: %s", parent.Name)
+		} else {
+			// Should not happen, but handle gracefully
+			parentPath = nil
+			parentName = ""
+			backupType = "full"
+			log.Printf("No parent found, creating FULL backup")
+		}
+	}
+
+	// Create btrfs send stream
+	btrfsCmd, btrfsOutput, err := CreateBtrfsSendDiff(snapshotPath, parentPath)
+	if err != nil {
+		return fmt.Errorf("failed to create btrfs send: %w", err)
+	}
+	defer btrfsOutput.Close()
+
+	// Compress with zstd
+	zstdCmd, zstdOutput, err := CompressWithZstd(btrfsOutput)
+	if err != nil {
+		btrfsCmd.Process.Kill()
+		return fmt.Errorf("failed to start zstd compression: %w", err)
+	}
+	defer zstdOutput.Close()
+
+	// Wrap with counting reader to measure size
+	countingReader := &CountingReader{reader: zstdOutput}
+
+	// Upload to S3
+	snapshotName := filepath.Base(snapshotPath)
+	key := GetSnapshotKey(snapshotName, parentName, dw.config.SnapshotPrefix)
+	
+	if err := dw.uploader.UploadStream(ctx, key, countingReader); err != nil {
+		btrfsCmd.Process.Kill()
+		zstdCmd.Process.Kill()
+		return fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	// Wait for commands to finish
+	if err := btrfsCmd.Wait(); err != nil {
+		return fmt.Errorf("btrfs send failed: %w", err)
+	}
+	
+	if err := zstdCmd.Wait(); err != nil {
+		return fmt.Errorf("zstd compression failed: %w", err)
+	}
+
+	// Get the size that was uploaded
+	uploadedSize := countingReader.count
+
+	// Create .done file with backup type and size
+	if err := CreateDoneFile(snapshotPath, backupType, uploadedSize); err != nil {
+		return fmt.Errorf("failed to create .done file: %w", err)
+	}
+
+	log.Printf("Successfully processed snapshot: %s -> %s (type: %s, size: %d bytes)", 
+		snapshotName, key, backupType, uploadedSize)
+	return nil
+}
+
+func (dw *DirectoryWatcher) Close() error {
+	return dw.watcher.Close()
+}

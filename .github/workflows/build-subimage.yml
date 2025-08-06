@@ -1,4 +1,4 @@
-name: Build Snapshotter
+name: Build Subimage
 
 on:
   push:
@@ -10,6 +10,9 @@ jobs:
       contents: read
     strategy:
       matrix:
+        subimage: &subimage
+        - snapshotter
+        - snapuploader
         include:
           - image: ubuntu-24.04
             arch: amd64
@@ -40,7 +43,7 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         annotations: ${{ steps.meta.outputs.annotations }}
         outputs: type=image,name=${{ secrets.DOCKER_IMAGE }},push-by-digest=true,name-canonical=true
-        target: snapshotter
+        target: ${{ matrix.subimage }}
     - name: Export digest
       run: |
         mkdir -p ${{ runner.temp }}/digests
@@ -49,7 +52,7 @@ jobs:
     - name: Upload digest
       uses: actions/upload-artifact@v4
       with:
-        name: digests-${{ matrix.arch }}
+        name: digests-${{ matrix.subimage }}-${{ matrix.arch }}
         path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
@@ -57,6 +60,8 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build
     if: github.event_name != 'pull_request'
+    matrix:
+      subimage: *subimage
     permissions:
       id-token: write
       attestations: write
@@ -66,13 +71,13 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: ${{ runner.temp }}/digests
-        pattern: digests-*
+        pattern: digests-${{ matrix.subimage }}-*
         merge-multiple: true
     - uses: docker/metadata-action@v5
       with:
         images: ${{ secrets.DOCKER_IMAGE }}
         tags:
-          type=ref,event=branch,prefix=snapshotter-
+          type=ref,event=branch,prefix=${{ matrix.subimage }}-
       env:
         DOCKER_METADATA_ANNOTATIONS_LEVELS: index
     - uses: docker/login-action@v3
