@@ -82,7 +82,7 @@ func handleConnection(conn net.Conn, src, prefix string, regex *regexp.Regexp) {
 
 			log.Printf("Creating snapshot: %s -> %s", src, dst)
 			
-			cmd := exec.Command("btrfs", "subvolume", "snapshot", src, dst)
+			cmd := exec.Command("btrfs", "subvolume", "snapshot", "-r", src, dst)
 			output, err := cmd.CombinedOutput()
 			
 			if err != nil {
