@@ -13,6 +13,9 @@ jobs:
         subimage: &subimage
           - snapshotter
           - snapuploader
+        arch:
+          - amd64
+          - arm64
         include:
           - image: ubuntu-24.04
             arch: amd64
