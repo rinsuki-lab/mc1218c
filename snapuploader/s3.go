@@ -9,12 +9,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type S3Uploader struct {
-	client *s3.Client
-	bucket string
+	client   *s3.Client
+	uploader *manager.Uploader
+	bucket   string
 }
 
 func NewS3Uploader(cfg *Config) (*S3Uploader, error) {
@@ -34,9 +36,16 @@ func NewS3Uploader(cfg *Config) (*S3Uploader, error) {
 		o.BaseEndpoint = aws.String(fmt.Sprintf("https://%s", cfg.S3Hostname))
 	})
 
+	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
+		// Configure uploader settings
+		u.PartSize = 16 * 1024 * 1024 // 16MB parts
+		u.Concurrency = 3             // 3 concurrent uploads
+	})
+
 	return &S3Uploader{
-		client: client,
-		bucket: cfg.S3Bucket,
+		client:   client,
+		uploader: uploader,
+		bucket:   cfg.S3Bucket,
 	}, nil
 }
 
@@ -53,7 +62,8 @@ func (u *S3Uploader) Upload(ctx context.Context, key string, reader io.Reader, c
 		input.ContentLength = aws.Int64(contentLength)
 	}
 
-	_, err := u.client.PutObject(ctx, input)
+	// Use the upload manager for better handling of streams
+	_, err := u.uploader.Upload(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
