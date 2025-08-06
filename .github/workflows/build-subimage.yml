@@ -60,8 +60,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build
     if: github.event_name != 'pull_request'
-    matrix:
-      subimage: *subimage
+    strategy:
+      matrix:
+        subimage: *subimage
     permissions:
       id-token: write
       attestations: write
