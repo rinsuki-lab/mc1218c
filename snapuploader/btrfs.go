@@ -110,6 +110,10 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 	// create a new full backup
 	if lastIncrementalSize > 0 && parent.Size > 0 {
 		if lastIncrementalSize > parent.Size/4 {
+			log.Printf("Creating full backup due to large incremental size: last incremental = %d bytes (%.2f MB), parent full = %d bytes (%.2f MB), ratio = %.2f%%",
+				lastIncrementalSize, float64(lastIncrementalSize)/1024/1024,
+				parent.Size, float64(parent.Size)/1024/1024,
+				float64(lastIncrementalSize)*100/float64(parent.Size))
 			return true
 		}
 	}
