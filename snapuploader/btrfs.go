@@ -150,7 +150,7 @@ func CreateBtrfsSendDiff(snapshotPath string, parentPath *string) (*exec.Cmd, io
 }
 
 func CompressWithZstd(input io.Reader) (*exec.Cmd, io.ReadCloser, error) {
-	cmd := exec.Command("zstd", "-22", "-T0")
+	cmd := exec.Command("zstd", "--ultra", "-22", "-T1")
 	
 	cmd.Stdin = input
 	
