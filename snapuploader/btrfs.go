@@ -53,7 +53,7 @@ func FindSnapshots(watchDir string) ([]SnapshotInfo, error) {
 		}
 
 		snapshotPath := filepath.Join(watchDir, entry.Name())
-		doneFile := filepath.Join(snapshotPath, ".done")
+		doneFile := snapshotPath + ".done"
 		
 		info := SnapshotInfo{
 			Path: snapshotPath,
@@ -171,7 +171,7 @@ func CompressWithZstd(input io.Reader) (*exec.Cmd, io.ReadCloser, error) {
 }
 
 func CreateDoneFile(snapshotPath string, backupType string, size int64) error {
-	doneFile := filepath.Join(snapshotPath, ".done")
+	doneFile := snapshotPath + ".done"
 	
 	content := DoneFileContent{
 		Type: backupType,

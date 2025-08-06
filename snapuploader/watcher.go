@@ -123,7 +123,7 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 	log.Printf("Processing snapshot: %s", snapshotPath)
 
 	// Check if already processed
-	doneFile := filepath.Join(snapshotPath, ".done")
+	doneFile := snapshotPath + ".done"
 	if _, err := os.Stat(doneFile); err == nil {
 		log.Printf("Snapshot already processed (has .done file): %s", snapshotPath)
 		return nil
