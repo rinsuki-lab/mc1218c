@@ -96,17 +96,39 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 		return true
 	}
 	
+	// Count incremental backups since the last full backup
+	incrementalCount := 0
 	// Find the last incremental backup size
 	var lastIncrementalSize int64 = 0
+	for i := len(snapshots) - 1; i >= 0; i-- {
+		snapshot := &snapshots[i]
+		if snapshot.HasDone && snapshot.BackupType == "full" {
+			// Found a full backup, stop counting
+			break
+		}
+		if snapshot.HasDone && snapshot.BackupType == "incremental" {
+			incrementalCount++
+			if lastIncrementalSize == 0 {
+				lastIncrementalSize = snapshot.Size
+			}
+		}
+	}
+	
+	// Check if the latest snapshot is a full backup
 	for i := len(snapshots) - 1; i >= 0; i-- {
 		snapshot := &snapshots[i]
 		if snapshot.HasDone && snapshot.BackupType == "full" {
 			return false // If full backup is latest snapshot, always create incremental backup
 		}
 		if snapshot.HasDone && snapshot.BackupType == "incremental" {
-			lastIncrementalSize = snapshot.Size
 			break
 		}
+	}
+	
+	// If there are 990 or more incremental backups, create a new full backup
+	if incrementalCount >= 990 {
+		log.Printf("Creating full backup due to reaching 990 incremental backups (count = %d)", incrementalCount)
+		return true
 	}
 	
 	// If last incremental size is more than 1/4 of the full backup size,
