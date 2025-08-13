@@ -4,7 +4,6 @@
 package net.rinsuki.mcplugins.preserveinventory;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,55 +12,24 @@ import java.util.UUID;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class PreserveInventoryPlugin extends JavaPlugin {
-    private final Map<UUID, Boolean> cache = new HashMap<>();
+    private File playersDir;
+    private final Map<UUID, PlayerState> instances = new HashMap<>();
 
     @Override
     public void onEnable() {
-        // Ensure data directories exist
+        // Ensure data folder exists and initialize per-player state directory
         getDataFolder().mkdirs();
-        new File(getDataFolder(), "players").mkdirs();
+        playersDir = new File(getDataFolder(), "players");
+        playersDir.mkdirs();
     }
 
-    private File getPlayerFile(UUID uuid) {
-        return new File(new File(getDataFolder(), "players"), uuid.toString() + ".yml");
-    }
-
-    private boolean readState(UUID uuid) {
-        // default: enabled (opt-out)
-        File file = getPlayerFile(uuid);
-        if (!file.exists()) return true;
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
-        return yaml.getBoolean("enabled", true);
-    }
-
-    private void writeState(UUID uuid, boolean enabled) {
-        File dir = new File(getDataFolder(), "players");
-        if (!dir.exists()) dir.mkdirs();
-        File file = getPlayerFile(uuid);
-        YamlConfiguration yaml = new YamlConfiguration();
-        yaml.set("enabled", enabled);
-        try {
-            yaml.save(file);
-        } catch (IOException e) {
-            getLogger().warning("Failed to save state for " + uuid + ": " + e.getMessage());
-        }
-    }
-
-    public boolean isEnabledFor(UUID uuid) {
-        if (cache.containsKey(uuid)) return cache.get(uuid);
-        boolean enabled = readState(uuid);
-        cache.put(uuid, enabled);
-        return enabled;
-    }
-
-    public void setEnabledFor(UUID uuid, boolean enabled) {
-        cache.put(uuid, enabled);
-        writeState(uuid, enabled);
+    private synchronized PlayerState getPlayerState(Player player) {
+        UUID uuid = player.getUniqueId();
+        return instances.computeIfAbsent(uuid, id -> new PlayerState(id, playersDir, getLogger()));
     }
 
     @Override
@@ -78,7 +46,7 @@ public class PreserveInventoryPlugin extends JavaPlugin {
         Player player = (Player) sender;
 
         if (args.length == 0) {
-            boolean enabled = isEnabledFor(player.getUniqueId());
+            boolean enabled = getPlayerState(player).isEnabled();
             player.sendMessage("PreserveInventory: " + (enabled ? "ON" : "OFF"));
             player.sendMessage("/" + label + " on | off で切り替えできます。");
             return true;
@@ -87,11 +55,11 @@ public class PreserveInventoryPlugin extends JavaPlugin {
         String sub = args[0].toLowerCase();
         switch (sub) {
             case "on":
-                setEnabledFor(player.getUniqueId(), true);
+                getPlayerState(player).setEnabled(true);
                 player.sendMessage("PreserveInventory を ON にしました。");
                 return true;
             case "off":
-                setEnabledFor(player.getUniqueId(), false);
+                getPlayerState(player).setEnabled(false);
                 player.sendMessage("PreserveInventory を OFF にしました。");
                 return true;
             default:
