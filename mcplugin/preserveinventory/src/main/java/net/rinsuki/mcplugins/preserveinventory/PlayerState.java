@@ -6,7 +6,9 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.ConfigurationSection;
 import java.util.List;
+import java.util.ArrayList;
 import java.time.Instant;
 import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
@@ -67,5 +69,84 @@ public class PlayerState {
         yaml.set(base + ".drops", drops);
 
         save(yaml);
+    }
+
+    public static class DeathSummary {
+        public final String deathId;
+        public final String createdAt;
+        public final String world;
+        public final double x;
+        public final double y;
+        public final double z;
+
+        public final List<ItemStack> drops;
+
+        public DeathSummary(String deathId, String createdAt, String world, double x, double y, double z, List<ItemStack> drops) {
+            this.deathId = deathId;
+            this.createdAt = createdAt;
+            this.world = world;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.drops = drops;
+        }
+    }
+
+    public synchronized List<DeathSummary> listDeaths() {
+        YamlConfiguration yaml = load();
+        ConfigurationSection sec = yaml.getConfigurationSection("deaths");
+        List<DeathSummary> list = new ArrayList<>();
+        if (sec == null) {
+            return list;
+        }
+        for (String id : sec.getKeys(false)) {
+            String base = "deaths." + id;
+            String createdAt = yaml.getString(base + ".createdAt", "");
+            String world = yaml.getString(base + ".location.world", "unknown");
+            double x = yaml.getDouble(base + ".location.x");
+            double y = yaml.getDouble(base + ".location.y");
+            double z = yaml.getDouble(base + ".location.z");
+            List<ItemStack> drops = new ArrayList<>();
+            List<?> raw = yaml.getList(base + ".drops");
+            if (raw != null) {
+                for (Object o : raw) {
+                    if (o instanceof ItemStack) {
+                        drops.add((ItemStack) o);
+                    }
+                }
+            }
+            list.add(new DeathSummary(id, createdAt, world, x, y, z, drops));
+        }
+        return list;
+    }
+
+    public synchronized List<String> listDeathIds() {
+        YamlConfiguration yaml = load();
+        ConfigurationSection sec = yaml.getConfigurationSection("deaths");
+        if (sec == null) {
+            return List.of();
+        }
+        return new ArrayList<>(sec.getKeys(false));
+    }
+
+    public synchronized List<ItemStack> takeAndRemove(String deathId) {
+        YamlConfiguration yaml = load();
+        String base = "deaths." + deathId;
+        if (!yaml.contains(base)) {
+            return null;
+        }
+        List<ItemStack> drops = new ArrayList<>();
+        List<?> raw = yaml.getList(base + ".drops");
+        if (raw != null) {
+            for (Object o : raw) {
+                if (o instanceof ItemStack) {
+                    drops.add((ItemStack) o);
+                }
+            }
+        }
+        // Remove the entry
+        yaml.set(base, null);
+        save(yaml);
+        return drops;
     }
 }

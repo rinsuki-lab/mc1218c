@@ -20,6 +20,20 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.JoinConfiguration;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+
+import org.bukkit.Material;
+
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
     private File playersDir;
@@ -57,6 +71,8 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
             boolean enabled = getPlayerState(player).isEnabled();
             player.sendMessage(enabled ? "PreserveInventoryが有効になっています。" : "PreserveInventoryが無効になっています。");
             player.sendMessage("/" + label + " on | off で切り替えできます。");
+            player.sendMessage("/" + label + " list で保存済みの死亡記録を表示します。");
+            player.sendMessage("/" + label + " take <deathId> で保存済みのアイテムを取り出します。");
             return true;
         }
 
@@ -70,8 +86,69 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                 getPlayerState(player).setEnabled(false);
                 player.sendMessage("PreserveInventoryを無効にしました。");
                 return true;
+            case "list":
+                {
+                    List<PlayerState.DeathSummary> list = getPlayerState(player).listDeaths();
+                    if (list.isEmpty()) {
+                        player.sendMessage("保存済みの死亡記録はありません。");
+                    } else {
+                        for (int i = 0; i < list.size(); i++) {
+                            PlayerState.DeathSummary s = list.get(i);
+                            String ts = formatTimestamp(s.createdAt);
+                            String header = String.format("%s に死亡 @ %s x%d y%d z%d", ts, s.world, Math.round(s.x), Math.round(s.y), Math.round(s.z));
+                            Component line1 = Component.text(header).color(NamedTextColor.AQUA);
+                            player.sendMessage(line1);
+
+                            Component itemsComp = summarizeDropsComponent(s.drops);
+
+                            Component btn = Component.text("[受け取る]")
+                                .color(NamedTextColor.GREEN)
+                                .decorate(TextDecoration.BOLD)
+                                .clickEvent(ClickEvent.runCommand("/" + label + " take " + s.deathId))
+                                .hoverEvent(HoverEvent.showText(Component.text("クリックして受け取る: " + s.deathId).color(NamedTextColor.YELLOW)));
+
+                            Component info = Component.text(" アイテム: ", NamedTextColor.GRAY)
+                                .append(itemsComp.colorIfAbsent(NamedTextColor.GRAY));
+
+                            // Send as siblings so only [受け取る] is clickable
+                            player.sendMessage(Component.empty().append(btn).append(info));
+
+                            if (i < list.size() - 1) {
+                                player.sendMessage("");
+                            }
+                        }
+                    }
+                    return true;
+                }
+            case "take":
+                {
+                    if (args.length < 2) {
+                        player.sendMessage("使い方: /" + label + " take <deathId>");
+                        return true;
+                    }
+                    String deathIdArg = args[1];
+                    List<ItemStack> drops = getPlayerState(player).takeAndRemove(deathIdArg);
+                    if (drops == null) {
+                        player.sendMessage("該当する死亡記録が見つかりません: " + deathIdArg);
+                        return true;
+                    }
+                    int total = 0;
+                    for (ItemStack item : drops) {
+                        if (item == null) continue;
+                        total += item.getAmount();
+                        Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
+                        if (!leftover.isEmpty()) {
+                            for (ItemStack remain : leftover.values()) {
+                                if (remain == null) continue;
+                                player.getWorld().dropItemNaturally(player.getLocation(), remain);
+                            }
+                        }
+                    }
+                    player.sendMessage("取り出し完了: 合計 " + total + " 個のアイテム。入りきらない分は足元にドロップしました。");
+                    return true;
+                }
             default:
-                player.sendMessage("使い方: /" + label + " on | off");
+                player.sendMessage("使い方: /" + label + " on | off | list | take <deathId>");
                 return true;
         }
     }
@@ -86,6 +163,17 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
             String prefix = args[0].toLowerCase();
             if ("on".startsWith(prefix)) c.add("on");
             if ("off".startsWith(prefix)) c.add("off");
+            if ("list".startsWith(prefix)) c.add("list");
+            if ("take".startsWith(prefix)) c.add("take");
+            return c;
+        }
+        if (args.length == 2 && "take".equalsIgnoreCase(args[0]) && sender instanceof Player) {
+            Player player = (Player) sender;
+            String prefix = args[1].toLowerCase();
+            List<String> c = new ArrayList<>();
+            for (String id : getPlayerState(player).listDeathIds()) {
+                if (id.toLowerCase().startsWith(prefix)) c.add(id);
+            }
             return c;
         }
         return List.of();
@@ -113,5 +201,47 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
         boolean enabled = getPlayerState(player).isEnabled();
         player.sendMessage(enabled ? "PreserveInventoryが有効になっています。" : "PreserveInventoryが無効になっています。");
         player.sendMessage("/preserveinventory on | off で切り替えできます。");
+    }
+
+    // --- Helpers for list formatting ---
+    private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss").withZone(ZoneId.of("Asia/Tokyo"));
+
+    private String formatTimestamp(String iso) {
+        try {
+            return TS_FMT.format(Instant.parse(iso));
+        } catch (Exception e) {
+            return iso;
+        }
+    }
+
+    private Component summarizeDropsComponent(List<ItemStack> drops) {
+        List<Component> parts = new ArrayList<>();
+        for (ItemStack it : drops) {
+            if (it == null || it.getType() == Material.AIR) continue;
+            parts.add(itemStackToComponent(it));
+        }
+        if (parts.isEmpty()) {
+            return Component.text("(なし)");
+        }
+        return Component.join(JoinConfiguration.separator(Component.text(", ", NamedTextColor.GRAY)), parts);
+    }
+
+    private Component itemStackToComponent(ItemStack it) {
+        ItemMeta meta = it.getItemMeta();
+        Component nameComp = null;
+        if (meta != null && meta.hasDisplayName()) {
+            nameComp = meta.displayName();
+            if (nameComp != null) {
+                nameComp = nameComp.color(NamedTextColor.WHITE).decorate(TextDecoration.ITALIC);
+            }
+        }
+        if (nameComp == null) {
+            String translationKey = it.getType().translationKey();
+            nameComp = Component.translatable(translationKey)
+                .color(NamedTextColor.WHITE)
+                .decoration(TextDecoration.ITALIC, false);
+        }
+
+        return nameComp.hoverEvent(it.asHoverEvent()).append(Component.text("×" + it.getAmount(), NamedTextColor.GRAY));
     }
 }
