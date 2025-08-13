@@ -18,9 +18,15 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
+import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.inventory.CraftItemEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.BookMeta;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.JoinConfiguration;
@@ -30,6 +36,13 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.World;
+import org.bukkit.entity.Item;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.event.player.PlayerDropItemEvent;
+import net.kyori.adventure.key.Key;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -38,6 +51,8 @@ import java.time.format.DateTimeFormatter;
 public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
     private File playersDir;
     private final Map<UUID, PlayerState> instances = new HashMap<>();
+    private NamespacedKey keyRecordDeathId;
+    private NamespacedKey keyRecordOwner;
 
     @Override
     public void onEnable() {
@@ -47,6 +62,10 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
         playersDir.mkdirs();
         // Register event listeners
         getServer().getPluginManager().registerEvents(this, this);
+
+        // Prepare PDC keys for "遺留品の記録"
+        keyRecordDeathId = new NamespacedKey(this, "recordDeathId");
+        keyRecordOwner = new NamespacedKey(this, "recordOwner");
     }
 
     private synchronized PlayerState getPlayerState(Player player) {
@@ -148,9 +167,15 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                         player.sendMessage("該当する死亡記録が見つかりません: " + deathIdArg);
                         return true;
                     }
+                    // If player holds a matching record, consume it and waive cost
+                    boolean usedRecord = false;
+                    if (hasRecordFor(player, deathIdArg)) {
+                        usedRecord = consumeRecordFor(player, deathIdArg);
+                    }
+
                     // Determine required payment (diamond has priority rule)
-                    int needDiamond = cost.diamond;
-                    int needIron = (needDiamond > 0) ? 0 : cost.iron;
+                    int needDiamond = usedRecord ? 0 : cost.diamond;
+                    int needIron = usedRecord ? 0 : ((needDiamond > 0) ? 0 : cost.iron);
 
                     // Check inventory for payment
                     if (needDiamond > 0) {
@@ -200,7 +225,9 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                         }
                     }
                     Component paidComp;
-                    if (needDiamond > 0) {
+                    if (usedRecord) {
+                        paidComp = Component.text("「遺留品の記録」を使用しました。", NamedTextColor.GRAY);
+                    } else if (needDiamond > 0) {
                         paidComp = materialName(Material.DIAMOND).append(Component.text("×" + needDiamond + " を支払いました。"));
                     } else if (needIron > 0) {
                         paidComp = materialName(Material.IRON_INGOT).append(Component.text("×" + needIron + " を支払いました。"));
@@ -245,6 +272,73 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
     }
 
     @EventHandler
+    public void onItemSpawn(ItemSpawnEvent event) {
+        Item item = event.getEntity();
+        ItemStack stack = item.getItemStack();
+        if (stack == null) return;
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return;
+        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        if (pdc.has(keyRecordDeathId, PersistentDataType.STRING) && pdc.has(keyRecordOwner, PersistentDataType.STRING)) {
+            item.setInvulnerable(true);
+            item.setUnlimitedLifetime(true);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerDropItem(PlayerDropItemEvent event) {
+        Item item = event.getItemDrop();
+        ItemStack stack = item.getItemStack();
+        if (stack == null) return;
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return;
+        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        if (pdc.has(keyRecordDeathId, PersistentDataType.STRING) && pdc.has(keyRecordOwner, PersistentDataType.STRING)) {
+            item.setInvulnerable(true);
+            item.setUnlimitedLifetime(true);
+        }
+    }
+
+    // Prevent using the record item in crafting (e.g., duplicating a written book)
+    @EventHandler
+    public void onPrepareCraft(PrepareItemCraftEvent event) {
+        for (ItemStack ingredient : event.getInventory().getMatrix()) {
+            if (isRecordItem(ingredient)) {
+                event.getInventory().setResult(new ItemStack(Material.AIR));
+                return;
+            }
+        }
+    }
+
+    @EventHandler
+    public void onCraftItem(CraftItemEvent event) {
+        for (ItemStack ingredient : event.getInventory().getMatrix()) {
+            if (isRecordItem(ingredient)) {
+                event.setCancelled(true);
+                if (event.getWhoClicked() instanceof Player p) {
+                    p.sendMessage("このアイテムはクラフトに使用できません。");
+                }
+                return;
+            }
+        }
+    }
+
+    // Prevent using the record item in villager trades
+    @EventHandler
+    public void onMerchantClick(InventoryClickEvent event) {
+        if (event.getView().getTopInventory() == null) return;
+        if (event.getView().getTopInventory().getType() != InventoryType.MERCHANT) return;
+        ItemStack cursor = event.getCursor();
+        ItemStack current = event.getCurrentItem();
+        if (isRecordItem(cursor) || isRecordItem(current)) {
+            event.setCancelled(true);
+            if (event.getWhoClicked() instanceof Player p) {
+                p.sendMessage("このアイテムは取引に使用できません。");
+            }
+        }
+    }
+
+    @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         PlayerState state = getPlayerState(player);
@@ -266,6 +360,14 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
 
         // Prevent item drops (they are preserved instead)
         event.getDrops().clear();
+
+        // Drop a "遺留品の記録" at death location
+        ItemStack record = createRecordItem(player, deathId, player.getLocation());
+        World world = player.getWorld();
+        Item dropped = world.dropItem(player.getLocation(), record);
+        // Make it resilient to lava/explosions and not despawn
+        dropped.setInvulnerable(true);
+        dropped.setUnlimitedLifetime(true);
     }
 
     @EventHandler
@@ -325,6 +427,109 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
             .decoration(TextDecoration.ITALIC, false);
     }
 
+    // --- "遺留品の記録" helpers ---
+    private boolean isRecordItem(ItemStack stack) {
+        if (stack == null) return false;
+        if (stack.getType() != Material.WRITTEN_BOOK) return false;
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return false;
+        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        return pdc.has(keyRecordDeathId, PersistentDataType.STRING) && pdc.has(keyRecordOwner, PersistentDataType.STRING);
+    }
+
+    private ItemStack createRecordItem(Player owner, String deathId, Location loc) {
+        ItemStack book = new ItemStack(Material.WRITTEN_BOOK, 1);
+        BookMeta meta = (BookMeta) book.getItemMeta();
+        meta.setTitle("遺留品の記録");
+        meta.setAuthor(owner.getName());
+        String ts = TS_FMT.format(Instant.now());
+        String world = (loc.getWorld() != null) ? loc.getWorld().getName() : "unknown";
+        int x = (int) Math.round(loc.getX());
+        int y = (int) Math.round(loc.getY());
+        int z = (int) Math.round(loc.getZ());
+
+        // Owner component with hover to show entity info (black text for readability)
+        Component ownerComp = Component.text(owner.getName(), NamedTextColor.BLACK)
+            .decoration(TextDecoration.ITALIC, false)
+            .hoverEvent(HoverEvent.showEntity(HoverEvent.ShowEntity.of(
+                Key.key("minecraft:player"), owner.getUniqueId(), Component.text(owner.getName()))));
+
+        // First page: instructions and clickable [受け取る]
+        Component takeBtn = Component.text("[受け取る]", NamedTextColor.BLACK)
+            .decorate(TextDecoration.BOLD)
+            .clickEvent(ClickEvent.runCommand("/preserveinventory take " + deathId))
+            .hoverEvent(HoverEvent.showText(Component.text("クリックして受け取る", NamedTextColor.YELLOW)));
+
+        Component page1 = Component.empty()
+            .append(Component.text("この本は遺留品の記録です。\n\n", NamedTextColor.BLACK))
+            .append(Component.text("所有者: ", NamedTextColor.BLACK))
+            .append(ownerComp)
+            .append(Component.text("\n\nこの本を持った状態で、下の ", NamedTextColor.BLACK))
+            .append(takeBtn)
+            .append(Component.text(" を押してください。\n\nこの記録を使用すると、コストなしで遺留品を受け取れます。", NamedTextColor.BLACK));
+
+        // Second page: details
+        Component page2 = Component.empty()
+            .append(Component.text("詳細情報\n\n", NamedTextColor.BLACK))
+            .append(Component.text("死亡ID: ", NamedTextColor.BLACK))
+            .append(Component.text(deathId, NamedTextColor.BLACK))
+            .append(Component.text("\n日時: ", NamedTextColor.BLACK))
+            .append(Component.text(ts, NamedTextColor.BLACK))
+            .append(Component.text("\n場所: ", NamedTextColor.BLACK))
+            .append(Component.text(world + " (" + x + ", " + y + ", " + z + ")", NamedTextColor.BLACK));
+
+        meta.addPages(page1, page2);
+
+        PersistentDataContainer pdc = meta.getPersistentDataContainer();
+        pdc.set(keyRecordDeathId, PersistentDataType.STRING, deathId);
+        pdc.set(keyRecordOwner, PersistentDataType.STRING, owner.getUniqueId().toString());
+
+        meta.displayName(Component.text("遺留品の記録", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
+        book.setItemMeta(meta);
+        return book;
+    }
+
+    private boolean hasRecordFor(Player player, String deathId) {
+        for (ItemStack stack : player.getInventory().getContents()) {
+            if (stack == null) continue;
+            if (stack.getType() != Material.WRITTEN_BOOK) continue;
+            ItemMeta meta = stack.getItemMeta();
+            if (meta == null) continue;
+            PersistentDataContainer pdc = meta.getPersistentDataContainer();
+            String did = pdc.get(keyRecordDeathId, PersistentDataType.STRING);
+            String owner = pdc.get(keyRecordOwner, PersistentDataType.STRING);
+            if (deathId.equals(did) && player.getUniqueId().toString().equals(owner)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean consumeRecordFor(Player player, String deathId) {
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            ItemStack stack = contents[i];
+            if (stack == null) continue;
+            if (stack.getType() != Material.WRITTEN_BOOK) continue;
+            ItemMeta meta = stack.getItemMeta();
+            if (meta == null) continue;
+            PersistentDataContainer pdc = meta.getPersistentDataContainer();
+            String did = pdc.get(keyRecordDeathId, PersistentDataType.STRING);
+            String owner = pdc.get(keyRecordOwner, PersistentDataType.STRING);
+            if (deathId.equals(did) && player.getUniqueId().toString().equals(owner)) {
+                int amt = stack.getAmount();
+                if (amt <= 1) {
+                    contents[i] = null;
+                } else {
+                    stack.setAmount(amt - 1);
+                    contents[i] = stack;
+                }
+                player.getInventory().setContents(contents);
+                return true;
+            }
+        }
+        return false;
+    }
     // --- Inventory helpers for payment ---
     private int countMaterial(Player player, Material material) {
         int count = 0;
