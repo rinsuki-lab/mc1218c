@@ -3,10 +3,115 @@
  */
 package net.rinsuki.mcplugins.preserveinventory;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class PreserveInventoryPlugin extends JavaPlugin {
+    private final Map<UUID, Boolean> cache = new HashMap<>();
+
     @Override
     public void onEnable() {
+        // Ensure data directories exist
+        getDataFolder().mkdirs();
+        new File(getDataFolder(), "players").mkdirs();
+    }
+
+    private File getPlayerFile(UUID uuid) {
+        return new File(new File(getDataFolder(), "players"), uuid.toString() + ".yml");
+    }
+
+    private boolean readState(UUID uuid) {
+        // default: enabled (opt-out)
+        File file = getPlayerFile(uuid);
+        if (!file.exists()) return true;
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
+        return yaml.getBoolean("enabled", true);
+    }
+
+    private void writeState(UUID uuid, boolean enabled) {
+        File dir = new File(getDataFolder(), "players");
+        if (!dir.exists()) dir.mkdirs();
+        File file = getPlayerFile(uuid);
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("enabled", enabled);
+        try {
+            yaml.save(file);
+        } catch (IOException e) {
+            getLogger().warning("Failed to save state for " + uuid + ": " + e.getMessage());
+        }
+    }
+
+    public boolean isEnabledFor(UUID uuid) {
+        if (cache.containsKey(uuid)) return cache.get(uuid);
+        boolean enabled = readState(uuid);
+        cache.put(uuid, enabled);
+        return enabled;
+    }
+
+    public void setEnabledFor(UUID uuid, boolean enabled) {
+        cache.put(uuid, enabled);
+        writeState(uuid, enabled);
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!"preserveinventory".equalsIgnoreCase(command.getName())) {
+            return false;
+        }
+
+        if (!(sender instanceof Player)) {
+            sender.sendMessage("このコマンドはプレイヤーのみが実行できます。");
+            return true;
+        }
+
+        Player player = (Player) sender;
+
+        if (args.length == 0) {
+            boolean enabled = isEnabledFor(player.getUniqueId());
+            player.sendMessage("PreserveInventory: " + (enabled ? "ON" : "OFF"));
+            player.sendMessage("/" + label + " on | off で切り替えできます。");
+            return true;
+        }
+
+        String sub = args[0].toLowerCase();
+        switch (sub) {
+            case "on":
+                setEnabledFor(player.getUniqueId(), true);
+                player.sendMessage("PreserveInventory を ON にしました。");
+                return true;
+            case "off":
+                setEnabledFor(player.getUniqueId(), false);
+                player.sendMessage("PreserveInventory を OFF にしました。");
+                return true;
+            default:
+                player.sendMessage("使い方: /" + label + " on | off");
+                return true;
+        }
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (!"preserveinventory".equalsIgnoreCase(command.getName())) {
+            return null;
+        }
+        if (args.length == 1) {
+            List<String> c = new ArrayList<>();
+            String prefix = args[0].toLowerCase();
+            if ("on".startsWith(prefix)) c.add("on");
+            if ("off".startsWith(prefix)) c.add("off");
+            return c;
+        }
+        return List.of();
     }
 }
