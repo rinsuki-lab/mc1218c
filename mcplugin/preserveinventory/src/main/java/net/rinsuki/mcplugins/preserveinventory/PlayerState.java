@@ -151,6 +151,30 @@ public class PlayerState {
         return drops;
     }
 
+    // --- Refund handling ---
+    public synchronized void saveRefund(String deathId, ItemStack paid) {
+        if (paid == null || paid.getType() == Material.AIR || paid.getAmount() <= 0) return;
+        YamlConfiguration yaml = load();
+        String base = "refunds." + deathId;
+        yaml.set(base + ".paid", paid);
+        save(yaml);
+    }
+
+    public synchronized ItemStack takeRefund(String deathId) {
+        YamlConfiguration yaml = load();
+        String base = "refunds." + deathId;
+        if (!yaml.contains(base)) return null;
+        ItemStack paid = null;
+        Object raw = yaml.get("refunds." + deathId + ".paid");
+        if (raw instanceof ItemStack) {
+            paid = (ItemStack) raw;
+        }
+        // Remove refund entry
+        yaml.set(base, null);
+        save(yaml);
+        return paid;
+    }
+
     public static class Cost {
         public final int iron;
         public final int diamond;

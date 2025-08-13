@@ -164,6 +164,26 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                     PlayerState state = getPlayerState(player);
                     PlayerState.Cost cost = state.getDeathCost(deathIdArg);
                     if (cost == null) {
+                        // No death entry found. If the player has the matching record and a refund exists, process refund.
+                        if (hasRecordFor(player, deathIdArg)) {
+                            ItemStack refund = state.takeRefund(deathIdArg);
+                            if (refund != null) {
+                                // Consume the record and give back the paid items
+                                consumeRecordFor(player, deathIdArg);
+                                Map<Integer, ItemStack> leftover = player.getInventory().addItem(refund);
+                                if (!leftover.isEmpty()) {
+                                    for (ItemStack remain : leftover.values()) {
+                                        if (remain == null) continue;
+                                        player.getWorld().dropItemNaturally(player.getLocation(), remain);
+                                    }
+                                }
+                                Component msg = Component.text("記録を使用し、支払った ")
+                                    .append(itemStackToComponent(refund))
+                                    .append(Component.text(" を返還しました。", NamedTextColor.GRAY));
+                                player.sendMessage(msg);
+                                return true;
+                            }
+                        }
                         player.sendMessage("該当する死亡記録が見つかりません: " + deathIdArg);
                         return true;
                     }
@@ -200,11 +220,17 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                     }
 
                     // Withdraw payment
+                    Material paidMat = null;
+                    int paidAmount = 0;
                     if (needDiamond > 0) {
                         removeMaterial(player, Material.DIAMOND, needDiamond);
+                        paidMat = Material.DIAMOND;
+                        paidAmount = needDiamond;
                     }
                     if (needIron > 0) {
                         removeMaterial(player, Material.IRON_INGOT, needIron);
+                        paidMat = Material.IRON_INGOT;
+                        paidAmount = needIron;
                     }
 
                     List<ItemStack> drops = state.takeAndRemove(deathIdArg);
@@ -223,6 +249,10 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                                 player.getWorld().dropItemNaturally(player.getLocation(), remain);
                             }
                         }
+                    }
+                    // Save refund info if payment was made (and record wasn't used)
+                    if (!usedRecord && paidMat != null && paidAmount > 0) {
+                        state.saveRefund(deathIdArg, new ItemStack(paidMat, paidAmount));
                     }
                     Component paidComp;
                     if (usedRecord) {
