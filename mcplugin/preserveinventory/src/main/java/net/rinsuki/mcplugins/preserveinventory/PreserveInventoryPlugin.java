@@ -101,13 +101,28 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
 
                             Component itemsComp = summarizeDropsComponent(s.drops);
 
+                            // Show cost summary first (with hover item info)
+                            PlayerState.Cost c = PlayerState.computeCost(s.drops);
+                            Component costComp;
+                            if (c.diamond > 0) {
+                                costComp = Component.text("コスト: ", NamedTextColor.GOLD)
+                                    .append(itemStackToComponent(new ItemStack(Material.DIAMOND, c.diamond)));
+                            } else if (c.iron > 0) {
+                                costComp = Component.text("コスト: ", NamedTextColor.GOLD)
+                                    .append(itemStackToComponent(new ItemStack(Material.IRON_INGOT, c.iron)));
+                            } else {
+                                costComp = Component.text("コスト: なし", NamedTextColor.GOLD);
+                            }
+
                             Component btn = Component.text("[受け取る]")
                                 .color(NamedTextColor.GREEN)
                                 .decorate(TextDecoration.BOLD)
                                 .clickEvent(ClickEvent.runCommand("/" + label + " take " + s.deathId))
                                 .hoverEvent(HoverEvent.showText(Component.text("クリックして受け取る: " + s.deathId).color(NamedTextColor.YELLOW)));
 
-                            Component info = Component.text(" アイテム: ", NamedTextColor.GRAY)
+                            Component info = Component.empty()
+                                .append(costComp)
+                                .append(Component.text("  アイテム: ", NamedTextColor.GRAY))
                                 .append(itemsComp.colorIfAbsent(NamedTextColor.GRAY));
 
                             // Send as siblings so only [受け取る] is clickable
@@ -127,7 +142,47 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                         return true;
                     }
                     String deathIdArg = args[1];
-                    List<ItemStack> drops = getPlayerState(player).takeAndRemove(deathIdArg);
+                    PlayerState state = getPlayerState(player);
+                    PlayerState.Cost cost = state.getDeathCost(deathIdArg);
+                    if (cost == null) {
+                        player.sendMessage("該当する死亡記録が見つかりません: " + deathIdArg);
+                        return true;
+                    }
+                    // Determine required payment (diamond has priority rule)
+                    int needDiamond = cost.diamond;
+                    int needIron = (needDiamond > 0) ? 0 : cost.iron;
+
+                    // Check inventory for payment
+                    if (needDiamond > 0) {
+                        int haveDiamond = countMaterial(player, Material.DIAMOND);
+                        if (haveDiamond < needDiamond) {
+                            Component req = itemStackToComponent(new ItemStack(Material.DIAMOND, needDiamond));
+                            player.sendMessage(Component.text("この遺留品を受け取るには", NamedTextColor.RED)
+                                .append(req)
+                                .append(Component.text("を支払うか、該当する「遺留品の記録」が必要です", NamedTextColor.RED)));
+                            return true;
+                        }
+                    }
+                    if (needIron > 0) {
+                        int haveIron = countMaterial(player, Material.IRON_INGOT);
+                        if (haveIron < needIron) {
+                            Component req = itemStackToComponent(new ItemStack(Material.IRON_INGOT, needIron));
+                            player.sendMessage(Component.text("この遺留品を受け取るには", NamedTextColor.RED)
+                                .append(req)
+                                .append(Component.text("を支払うか、該当する「遺留品の記録」が必要です", NamedTextColor.RED)));
+                            return true;
+                        }
+                    }
+
+                    // Withdraw payment
+                    if (needDiamond > 0) {
+                        removeMaterial(player, Material.DIAMOND, needDiamond);
+                    }
+                    if (needIron > 0) {
+                        removeMaterial(player, Material.IRON_INGOT, needIron);
+                    }
+
+                    List<ItemStack> drops = state.takeAndRemove(deathIdArg);
                     if (drops == null) {
                         player.sendMessage("該当する死亡記録が見つかりません: " + deathIdArg);
                         return true;
@@ -144,7 +199,17 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
                             }
                         }
                     }
-                    player.sendMessage("取り出し完了: 合計 " + total + " 個のアイテム。入りきらない分は足元にドロップしました。");
+                    Component paidComp;
+                    if (needDiamond > 0) {
+                        paidComp = materialName(Material.DIAMOND).append(Component.text("×" + needDiamond + " を支払いました。"));
+                    } else if (needIron > 0) {
+                        paidComp = materialName(Material.IRON_INGOT).append(Component.text("×" + needIron + " を支払いました。"));
+                    } else {
+                        paidComp = Component.text("コストなし。", NamedTextColor.GRAY);
+                    }
+                    player.sendMessage(Component.text("取り出し完了: 合計 " + total + " 個のアイテム。")
+                        .append(paidComp)
+                        .append(Component.text(" 入りきらない分は足元にドロップしました。")));
                     return true;
                 }
             default:
@@ -187,7 +252,15 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
             return;
         }
 
-        // Save snapshot with UUID death ID
+        // Compute cost for this death
+        PlayerState.Cost cost = PlayerState.computeCost(event.getDrops());
+
+        // If total cost is 0, do not preserve; drop as vanilla
+        if (cost.total() == 0) {
+            return;
+        }
+
+        // Save snapshot with UUID death ID (including cost)
         String deathId = UUID.randomUUID().toString();
         state.saveDeathSnapshot(deathId, player.getLocation(), event.getDrops());
 
@@ -243,5 +316,41 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
         }
 
         return nameComp.hoverEvent(it.asHoverEvent()).append(Component.text("×" + it.getAmount(), NamedTextColor.GRAY));
+    }
+
+    private Component materialName(Material m) {
+        String key = m.translationKey();
+        return Component.translatable(key)
+            .color(NamedTextColor.WHITE)
+            .decoration(TextDecoration.ITALIC, false);
+    }
+
+    // --- Inventory helpers for payment ---
+    private int countMaterial(Player player, Material material) {
+        int count = 0;
+        for (ItemStack stack : player.getInventory().getContents()) {
+            if (stack == null) continue;
+            if (stack.getType() == material) {
+                count += stack.getAmount();
+            }
+        }
+        return count;
+    }
+
+    private void removeMaterial(Player player, Material material, int amount) {
+        if (amount <= 0) return;
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length && amount > 0; i++) {
+            ItemStack stack = contents[i];
+            if (stack == null) continue;
+            if (stack.getType() != material) continue;
+            int take = Math.min(amount, stack.getAmount());
+            stack.setAmount(stack.getAmount() - take);
+            amount -= take;
+            if (stack.getAmount() <= 0) {
+                contents[i] = null;
+            }
+        }
+        player.getInventory().setContents(contents);
     }
 }

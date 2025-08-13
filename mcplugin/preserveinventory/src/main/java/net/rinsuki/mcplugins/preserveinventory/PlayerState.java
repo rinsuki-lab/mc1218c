@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.time.Instant;
 import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.Material;
 
 public class PlayerState {
     private final UUID uuid;
@@ -148,5 +149,95 @@ public class PlayerState {
         yaml.set(base, null);
         save(yaml);
         return drops;
+    }
+
+    public static class Cost {
+        public final int iron;
+        public final int diamond;
+        public Cost(int iron, int diamond) {
+            this.iron = iron;
+            this.diamond = diamond;
+        }
+        public int total() { return iron + diamond; }
+    }
+
+    public static Cost computeCost(List<ItemStack> drops) {
+        int iron = 0;
+        int diamond = 0;
+        if (drops != null) {
+            for (ItemStack it : drops) {
+                if (it == null) continue;
+                Material m = it.getType();
+                if (m == Material.AIR) continue;
+                int amt = it.getAmount();
+                if (isDiamondCostItem(m)) {
+                    diamond += amt;
+                } else if (isIronCostItem(m)) {
+                    iron += amt;
+                }
+            }
+        }
+        if (diamond > 0) {
+            iron = 0; // special rule: diamond overrides iron
+        }
+        return new Cost(iron, diamond);
+    }
+
+    public synchronized Cost getDeathCost(String deathId) {
+        YamlConfiguration yaml = load();
+        String base = "deaths." + deathId;
+        if (!yaml.contains(base)) return null;
+        List<ItemStack> drops = new ArrayList<>();
+        List<?> raw = yaml.getList(base + ".drops");
+        if (raw != null) {
+            for (Object o : raw) {
+                if (o instanceof ItemStack) {
+                    drops.add((ItemStack) o);
+                }
+            }
+        }
+        return computeCost(drops);
+    }
+
+    private static boolean isIronCostItem(Material m) {
+        switch (m) {
+            case IRON_HELMET:
+            case IRON_CHESTPLATE:
+            case IRON_LEGGINGS:
+            case IRON_BOOTS:
+            case IRON_SWORD:
+            case IRON_AXE:
+            case IRON_PICKAXE:
+            case IRON_SHOVEL:
+            case IRON_HOE:
+            case IRON_HORSE_ARMOR:
+            case SHIELD:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static boolean isDiamondCostItem(Material m) {
+        switch (m) {
+            case DIAMOND_HELMET:
+            case DIAMOND_CHESTPLATE:
+            case DIAMOND_LEGGINGS:
+            case DIAMOND_BOOTS:
+            case DIAMOND_SWORD:
+            case DIAMOND_AXE:
+            case DIAMOND_PICKAXE:
+            case DIAMOND_SHOVEL:
+            case DIAMOND_HOE:
+            case DIAMOND_HORSE_ARMOR:
+            case ELYTRA:
+            case SHULKER_BOX:
+                return true;
+            default:
+                break;
+        }
+        // All colored shulker box variants
+        String name = m.name();
+        return name.endsWith("_SHULKER_BOX");
     }
 }
