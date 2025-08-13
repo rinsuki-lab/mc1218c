@@ -1,0 +1,11 @@
+name: PreserveInventory
+version: 1.0.0
+main: net.rinsuki.mcplugins.preserveinventory.PreserveInventoryPlugin
+description: preserve your inventory (opt-out)
+author: rinsuki
+website: https://github.com/rinsuki-lab/mc1218c
+api-version: '1.21.8'
+commands:
+  preserveinventory:
+    description: Switch ON/OFF or take back your inventory (with cost)
+    usage: /<command>
