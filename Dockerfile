@@ -2,7 +2,7 @@ FROM eclipse-temurin:21 AS plugin-build
 WORKDIR /plugin
 COPY ./mcplugin/*.* ./mcplugin/gradlew ./
 COPY ./mcplugin/gradle ./gradle
-COPY ./mcplugin/src ./src
+COPY ./mcplugin/snaptaker ./snaptaker
 RUN ./gradlew jar
 
 FROM eclipse-temurin:21 AS build
@@ -17,7 +17,7 @@ RUN cd /minecraft/plugins \
     && wget https://cdn.modrinth.com/data/UmLGoGij/versions/305Ndn4O/DiscordSRV-Build-1.30.0.jar \
     && wget https://cdn.modrinth.com/data/cUhi3iB2/versions/TQ6Qp5P0/tabtps-spigot-1.3.28.jar \
     && wget https://cdn.modrinth.com/data/p1ewR5kV/versions/Ypqt7eH1/unifiedmetrics-platform-bukkit-0.3.8.jar
-COPY --from=plugin-build /plugin/build/libs/*.jar /minecraft/plugins/
+COPY --from=plugin-build /plugin/snaptaker/build/libs/*.jar /minecraft/plugins/
 RUN echo "stop" | java -jar paper.jar
 
 FROM eclipse-temurin:21 AS symlinkbuild
