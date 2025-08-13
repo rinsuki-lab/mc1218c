@@ -254,6 +254,15 @@ public class PlayerState {
             case DIAMOND_SHOVEL:
             case DIAMOND_HOE:
             case DIAMOND_HORSE_ARMOR:
+            case NETHERITE_HELMET:
+            case NETHERITE_CHESTPLATE:
+            case NETHERITE_LEGGINGS:
+            case NETHERITE_BOOTS:
+            case NETHERITE_SWORD:
+            case NETHERITE_AXE:
+            case NETHERITE_PICKAXE:
+            case NETHERITE_SHOVEL:
+            case NETHERITE_HOE:
             case ELYTRA:
             case SHULKER_BOX:
                 return true;
