@@ -17,6 +17,9 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.Location;
+import org.bukkit.inventory.ItemStack;
 
 public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
     private File playersDir;
@@ -86,6 +89,22 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
             return c;
         }
         return List.of();
+    }
+
+    @EventHandler
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        Player player = event.getEntity();
+        PlayerState state = getPlayerState(player);
+        if (!state.isEnabled()) {
+            return;
+        }
+
+        // Save snapshot with UUID death ID
+        String deathId = UUID.randomUUID().toString();
+        state.saveDeathSnapshot(deathId, player.getLocation(), event.getDrops());
+
+        // Prevent item drops (they are preserved instead)
+        event.getDrops().clear();
     }
 
     @EventHandler
