@@ -13,9 +13,12 @@ import java.util.UUID;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public class PreserveInventoryPlugin extends JavaPlugin {
+public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
     private File playersDir;
     private final Map<UUID, PlayerState> instances = new HashMap<>();
 
@@ -25,6 +28,8 @@ public class PreserveInventoryPlugin extends JavaPlugin {
         getDataFolder().mkdirs();
         playersDir = new File(getDataFolder(), "players");
         playersDir.mkdirs();
+        // Register event listeners
+        getServer().getPluginManager().registerEvents(this, this);
     }
 
     private synchronized PlayerState getPlayerState(Player player) {
@@ -47,7 +52,7 @@ public class PreserveInventoryPlugin extends JavaPlugin {
 
         if (args.length == 0) {
             boolean enabled = getPlayerState(player).isEnabled();
-            player.sendMessage("PreserveInventory: " + (enabled ? "ON" : "OFF"));
+            player.sendMessage(enabled ? "PreserveInventoryが有効になっています。" : "PreserveInventoryが無効になっています。");
             player.sendMessage("/" + label + " on | off で切り替えできます。");
             return true;
         }
@@ -56,11 +61,11 @@ public class PreserveInventoryPlugin extends JavaPlugin {
         switch (sub) {
             case "on":
                 getPlayerState(player).setEnabled(true);
-                player.sendMessage("PreserveInventory を ON にしました。");
+                player.sendMessage("PreserveInventoryを有効にしました。");
                 return true;
             case "off":
                 getPlayerState(player).setEnabled(false);
-                player.sendMessage("PreserveInventory を OFF にしました。");
+                player.sendMessage("PreserveInventoryを無効にしました。");
                 return true;
             default:
                 player.sendMessage("使い方: /" + label + " on | off");
@@ -81,5 +86,13 @@ public class PreserveInventoryPlugin extends JavaPlugin {
             return c;
         }
         return List.of();
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        boolean enabled = getPlayerState(player).isEnabled();
+        player.sendMessage(enabled ? "PreserveInventoryが有効になっています。" : "PreserveInventoryが無効になっています。");
+        player.sendMessage("/preserveinventory on | off で切り替えできます。");
     }
 }
