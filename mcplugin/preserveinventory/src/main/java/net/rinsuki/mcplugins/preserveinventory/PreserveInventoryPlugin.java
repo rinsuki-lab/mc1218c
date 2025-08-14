@@ -16,6 +16,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.ItemSpawnEvent;
@@ -406,6 +407,13 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
         boolean enabled = getPlayerState(player).isEnabled();
         player.sendMessage(enabled ? "PreserveInventoryが有効になっています。" : "PreserveInventoryが無効になっています。");
         player.sendMessage("/preserveinventory on | off で切り替えできます。");
+        sendPendingInfo(player);
+    }
+
+    @EventHandler
+    public void onRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        sendPendingInfo(player);
     }
 
     // --- Helpers for list formatting ---
@@ -448,6 +456,22 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
         }
 
         return nameComp.hoverEvent(it.asHoverEvent()).append(Component.text("×" + it.getAmount(), NamedTextColor.GRAY));
+    }
+
+    private void sendPendingInfo(Player player) {
+        List<String> list = getPlayerState(player).listDeathIds();
+        int pending = list.size();
+        if (pending > 0) {
+            Component btn = Component.text("[一覧を見る]")
+                .color(NamedTextColor.GREEN)
+                .decorate(TextDecoration.BOLD)
+                .clickEvent(ClickEvent.runCommand("/preserveinventory list"))
+                .hoverEvent(HoverEvent.showText(Component.text("クリックして一覧を表示", NamedTextColor.YELLOW)));
+            Component msg = Component.text("未受け取りの遺留品が " + pending + " 件あります。", NamedTextColor.YELLOW);
+            player.sendMessage(Component.empty().append(btn).append(Component.text(" ")).append(msg));
+        } else {
+            player.sendMessage(Component.text("未受け取りの遺留品はありません。", NamedTextColor.GRAY));
+        }
     }
 
     private Component materialName(Material m) {
