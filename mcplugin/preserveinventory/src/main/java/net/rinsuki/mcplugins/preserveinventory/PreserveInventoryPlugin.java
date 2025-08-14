@@ -382,6 +382,15 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
 
         // If total cost is 0, do not preserve; drop as vanilla
         if (cost.total() == 0) {
+            // Inform player that nothing will be preserved due to zero cost with coordinates
+            Location loc = player.getLocation();
+            int x = (int) Math.round(loc.getX());
+            int y = (int) Math.round(loc.getY());
+            int z = (int) Math.round(loc.getZ());
+            player.sendMessage(Component.text(
+                "ドロップしたアイテムのコストが0のため、遺留品は回収されませんでした (x" + x + ", y" + y + ", z" + z + ")",
+                NamedTextColor.GRAY
+            ));
             return;
         }
 
