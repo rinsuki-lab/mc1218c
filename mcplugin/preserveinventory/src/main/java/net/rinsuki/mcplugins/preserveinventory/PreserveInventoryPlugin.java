@@ -527,9 +527,9 @@ public class PreserveInventoryPlugin extends JavaPlugin implements Listener {
             .append(Component.text("この本は遺留品の記録です。\n\n", NamedTextColor.BLACK))
             .append(Component.text("所有者: ", NamedTextColor.BLACK))
             .append(ownerComp)
-            .append(Component.text("\n\nこの本を持った状態で、下の ", NamedTextColor.BLACK))
+            .append(Component.text("\n\nこの本がインベントリの中にある状態で、", NamedTextColor.BLACK))
             .append(takeBtn)
-            .append(Component.text(" を押してください。\n\nこの記録を使用すると、コストなしで遺留品を受け取れます。", NamedTextColor.BLACK));
+            .append(Component.text(" を押すと、コストなしで遺留品を受け取れます。", NamedTextColor.BLACK));
 
         // Second page: details
         Component page2 = Component.empty()
