@@ -96,10 +96,10 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 		return true
 	}
 	
-	// Count incremental backups since the last full backup
+	// Metrics since the last full backup
 	incrementalCount := 0
-	// Find the last incremental backup size
 	var lastIncrementalSize int64 = 0
+	var cumulativeIncrementalSize int64 = 0
 	for i := len(snapshots) - 1; i >= 0; i-- {
 		snapshot := &snapshots[i]
 		if snapshot.HasDone && snapshot.BackupType == "full" {
@@ -108,6 +108,7 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 		}
 		if snapshot.HasDone && snapshot.BackupType == "incremental" {
 			incrementalCount++
+			cumulativeIncrementalSize += snapshot.Size
 			if lastIncrementalSize == 0 {
 				lastIncrementalSize = snapshot.Size
 			}
@@ -141,6 +142,18 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 				float64(lastIncrementalSize)*100/float64(parent.Size))
 			return true
 		}
+	}
+	
+	// If cumulative incremental size since the last full exceeds the size of the last full,
+	// the next backup should be a full backup
+	if cumulativeIncrementalSize > 0 && parent.Size > 0 && cumulativeIncrementalSize > parent.Size {
+		log.Printf(
+			"Creating full backup due to cumulative incremental size exceeding full: cumulative = %d bytes (%.2f MB), parent full = %d bytes (%.2f MB), ratio = %.2f%%",
+			cumulativeIncrementalSize, float64(cumulativeIncrementalSize)/1024/1024,
+			parent.Size, float64(parent.Size)/1024/1024,
+			float64(cumulativeIncrementalSize)*100/float64(parent.Size),
+		)
+		return true
 	}
 	
 	return false
