@@ -18,7 +18,8 @@ RUN cd /minecraft/plugins \
     && wget https://cdn.modrinth.com/data/UmLGoGij/versions/305Ndn4O/DiscordSRV-Build-1.30.0.jar \
     && wget https://cdn.modrinth.com/data/cUhi3iB2/versions/TQ6Qp5P0/tabtps-spigot-1.3.28.jar \
     && wget https://cdn.modrinth.com/data/p1ewR5kV/versions/Ypqt7eH1/unifiedmetrics-platform-bukkit-0.3.8.jar \
-    && wget https://cdn.modrinth.com/data/swbUV1cr/versions/bhZhBtEw/bluemap-5.11-paper.jar
+    && wget https://cdn.modrinth.com/data/swbUV1cr/versions/bhZhBtEw/bluemap-5.11-paper.jar \
+    && wget https://cdn.modrinth.com/data/MswVHkMy/versions/LL1WyFsf/SignMarkers-0.0.1.jar
 COPY --from=plugin-build /plugin/snaptaker/build/libs/*.jar /minecraft/plugins/
 COPY --from=plugin-build /plugin/preserveinventory/build/libs/*.jar /minecraft/plugins/
 RUN echo "stop" | java -jar paper.jar
