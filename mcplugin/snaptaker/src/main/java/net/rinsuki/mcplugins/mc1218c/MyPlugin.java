@@ -17,6 +17,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
 import com.destroystokyo.paper.event.server.ServerTickStartEvent;
 
+import net.kyori.adventure.text.Component;
+
 public class MyPlugin extends JavaPlugin implements Listener {
     private long lastTime = -1;
 
@@ -87,6 +89,8 @@ public class MyPlugin extends JavaPlugin implements Listener {
             }
             if (res.startsWith("SUCCESS: ")) {
                 sender.sendMessage("Snapshot created: " + res);
+                // Broadcast to all players after snapshot creation
+                getServer().broadcast(Component.text("バックアップを作成しました: " + name));
             } else {
                 sender.sendMessage("Snapshot creation failed");
             }
@@ -94,6 +98,7 @@ public class MyPlugin extends JavaPlugin implements Listener {
             sender.sendMessage("Failed to create snapshot");
             getLogger().severe("Snapshot creation failed: " + e.getMessage());
             e.printStackTrace();
+            getServer().broadcast(Component.text("バックアップの作成に失敗しました"));
         }
     }
 }
