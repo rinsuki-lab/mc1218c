@@ -9,3 +9,6 @@ commands:
   snapshot:
     description: Take snapshot backup immediately
     usage: /<command>
+  pos:
+    description: show current pos to chat
+    usage: /<command>

@@ -12,6 +12,7 @@ import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -42,6 +43,20 @@ public class MyPlugin extends JavaPlugin implements Listener {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equalsIgnoreCase("snapshot")) {
             makeSnapshot(sender);
+            return true;
+        } else if (command.getName().equalsIgnoreCase("pos")) {
+            if (sender instanceof Player) {
+                Player player = (Player) sender;
+                int x = player.getLocation().getBlockX();
+                int y = player.getLocation().getBlockY();
+                int z = player.getLocation().getBlockZ();
+                String worldName = player.getWorld().getName();
+                String message = String.format("I'm at %s (x: %d, y: %d, z: %d)", worldName, x, y, z);
+                // Make the player say the coordinates in chat
+                player.chat(message);
+            } else {
+                sender.sendMessage("このコマンドはプレイヤーのみ使用できます。");
+            }
             return true;
         }
         return false;
