@@ -16,18 +16,26 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.player.PlayerQuitEvent;
 import com.destroystokyo.paper.event.server.ServerTickStartEvent;
 
 import net.kyori.adventure.text.Component;
 
 public class MyPlugin extends JavaPlugin implements Listener {
     private long lastTime = -1;
+    private volatile long lastPlayerQuitAtMillis = -1;
 
     @Override
     public void onEnable() {
         Bukkit.getPluginManager().registerEvents(this, this);
     }
     
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        // Record the time when a player quits
+        lastPlayerQuitAtMillis = System.currentTimeMillis();
+    }
+
     @EventHandler
     public void onTickStarted(ServerTickStartEvent event) {
         Server server = getServer();
@@ -106,6 +114,13 @@ public class MyPlugin extends JavaPlugin implements Listener {
                 sender.sendMessage("Snapshot created: " + res);
                 // Broadcast to all players after snapshot creation
                 getServer().broadcast(Component.text("バックアップを作成しました: " + name));
+                // If someone left within the last minute, notify Discord via console
+                long now = System.currentTimeMillis();
+                if (lastPlayerQuitAtMillis > 0 && (now - lastPlayerQuitAtMillis) <= 60_000L) {
+                    Bukkit.dispatchCommand(server.getConsoleSender(), "discord broadcast 朝が来ました");
+                    // Reset to avoid duplicate notifications for the same quit
+                    lastPlayerQuitAtMillis = -1;
+                }
             } else {
                 sender.sendMessage("Snapshot creation failed");
             }
