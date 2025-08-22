@@ -2,9 +2,13 @@ FROM eclipse-temurin:21 AS plugin-build
 WORKDIR /plugin
 COPY ./mcplugin/*.* ./mcplugin/gradlew ./
 COPY ./mcplugin/gradle ./gradle
+COPY ./mcplugin/snaptaker/build.gradle ./snaptaker/build.gradle
+COPY ./mcplugin/preserveinventory/build.gradle ./preserveinventory/settings.gradle
+RUN ./gradlew paperweightUserdevSetup
 COPY ./mcplugin/snaptaker ./snaptaker
 COPY ./mcplugin/preserveinventory ./preserveinventory
 RUN ./gradlew jar
+RUN rm ./*/build/libs/*-reobf.jar
 
 FROM eclipse-temurin:21 AS build
 ENV LANG=ja_JP.UTF-8
@@ -21,6 +25,8 @@ RUN cd /minecraft/plugins \
     && wget https://cdn.modrinth.com/data/swbUV1cr/versions/bhZhBtEw/bluemap-5.11-paper.jar \
     && wget https://cdn.modrinth.com/data/MswVHkMy/versions/LL1WyFsf/SignMarkers-0.0.1.jar \
     && wget https://hangarcdn.papermc.io/plugins/harry/PortableCrafting/versions/2.0.0/PAPER/PortableCrafting-2.0.0.jar
+RUN echo "stop" | java -jar paper.jar
+
 COPY --from=plugin-build /plugin/snaptaker/build/libs/*.jar /minecraft/plugins/
 COPY --from=plugin-build /plugin/preserveinventory/build/libs/*.jar /minecraft/plugins/
 RUN echo "stop" | java -jar paper.jar

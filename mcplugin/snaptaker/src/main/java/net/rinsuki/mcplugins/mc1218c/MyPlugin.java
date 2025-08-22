@@ -1,29 +1,42 @@
 package net.rinsuki.mcplugins.mc1218c;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Optional;
 
 import org.bukkit.Bukkit;
+import org.bukkit.GameRule;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.player.PlayerBedEnterEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.java.JavaPlugin;
+
 import com.destroystokyo.paper.event.server.ServerTickStartEvent;
 
 import net.kyori.adventure.text.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.players.SleepStatus;
 
 public class MyPlugin extends JavaPlugin implements Listener {
     private long lastTime = -1;
     private volatile long lastPlayerQuitAtMillis = -1;
+    private long lastWarnDay = -1; // day index for which we sent the 1-minute warning
+    private Optional<Field> sleepStatusField = Arrays.stream(ServerLevel.class.getDeclaredFields())
+        .filter(f -> f.getType() == SleepStatus.class)
+        .findFirst();
 
     @Override
     public void onEnable() {
@@ -36,15 +49,49 @@ public class MyPlugin extends JavaPlugin implements Listener {
         lastPlayerQuitAtMillis = System.currentTimeMillis();
     }
 
+
+    final long TICK_PER_DAY = 24000;
+    final long TICK_PER_SECOND = 20;
+
     @EventHandler
     public void onTickStarted(ServerTickStartEvent event) {
         Server server = getServer();
-        long currentTime = server.getWorld("world").getFullTime() % 24000;
+        long fullTime = server.getWorld("world").getFullTime();
+        long currentTime = fullTime % 24000;
+        long currentDay = fullTime / 24000;
         
+        if (lastTime != -1 && lastTime < (TICK_PER_DAY - 100) && currentTime >= (TICK_PER_DAY - 100) && lastWarnDay != currentDay) {
+            // announce upcoming backup
+            getServer().broadcast(Component.text("バックアップがもうすぐ行われます"));
+            lastWarnDay = currentDay;
+        }
+
         if (lastTime != -1 && currentTime < lastTime) {
             makeSnapshot(server.getConsoleSender());
         }
         lastTime = currentTime;
+    }
+
+    @EventHandler
+    public void onPlayerBedEnter(PlayerBedEnterEvent event) {
+        World world = event.getPlayer().getWorld();
+        CraftWorld craftWorld = (CraftWorld) world;
+        getServer().getScheduler().scheduleSyncDelayedTask(this, () -> {
+            try {
+                Field sleepStatusField = this.sleepStatusField.get();
+                sleepStatusField.setAccessible(true);
+                SleepStatus sleepStatus = (SleepStatus) sleepStatusField.get(craftWorld.getHandle());
+                if (sleepStatus.areEnoughSleeping(world.getGameRuleValue(GameRule.PLAYERS_SLEEPING_PERCENTAGE))) {
+                    getServer().broadcast(Component.text("バックアップがもうすぐ行われます"));
+                }
+            } catch (IllegalArgumentException e) {
+                e.printStackTrace();
+                return;
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+                return;
+            }
+        });
     }
     
     @Override
