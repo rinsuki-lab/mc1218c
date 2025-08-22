@@ -102,16 +102,20 @@ func (dw *DirectoryWatcher) handleEvent(ctx context.Context, event fsnotify.Even
 }
 
 func (dw *DirectoryWatcher) processExistingSnapshots(ctx context.Context) error {
-	snapshots, err := FindSnapshots(dw.watchDir)
-	if err != nil {
-		return fmt.Errorf("failed to find snapshots: %w", err)
-	}
+	someNotDoneSnapshotsFound := true
+	for someNotDoneSnapshotsFound {
+		someNotDoneSnapshotsFound = false
+		snapshots, err := FindSnapshots(dw.watchDir)
+		if err != nil {
+			return fmt.Errorf("failed to find snapshots: %w", err)
+		}
 
-	for _, snapshot := range snapshots {
-		if !snapshot.HasDone {
-			log.Printf("Found unprocessed snapshot: %s", snapshot.Name)
-			if err := dw.processSnapshot(ctx, snapshot.Path); err != nil {
-				log.Printf("Error processing snapshot %s: %v", snapshot.Name, err)
+		for _, snapshot := range snapshots {
+			if !snapshot.HasDone {
+				log.Printf("Found unprocessed snapshot: %s", snapshot.Name)
+				if err := dw.processSnapshot(ctx, snapshot.Path); err != nil {
+					log.Printf("Error processing snapshot %s: %v", snapshot.Name, err)
+				}
 			}
 		}
 	}
