@@ -3,7 +3,7 @@ WORKDIR /plugin
 COPY ./mcplugin/*.* ./mcplugin/gradlew ./
 COPY ./mcplugin/gradle ./gradle
 COPY ./mcplugin/snaptaker/build.gradle ./snaptaker/build.gradle
-COPY ./mcplugin/preserveinventory/build.gradle ./preserveinventory/settings.gradle
+COPY ./mcplugin/preserveinventory/build.gradle ./preserveinventory/build.gradle
 RUN ./gradlew paperweightUserdevSetup
 COPY ./mcplugin/snaptaker/src ./snaptaker/src
 COPY ./mcplugin/preserveinventory/src ./preserveinventory/src
