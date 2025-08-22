@@ -5,10 +5,9 @@ COPY ./mcplugin/gradle ./gradle
 COPY ./mcplugin/snaptaker/build.gradle ./snaptaker/build.gradle
 COPY ./mcplugin/preserveinventory/build.gradle ./preserveinventory/settings.gradle
 RUN ./gradlew paperweightUserdevSetup
-COPY ./mcplugin/snaptaker ./snaptaker
-COPY ./mcplugin/preserveinventory ./preserveinventory
+COPY ./mcplugin/snaptaker/src ./snaptaker/src
+COPY ./mcplugin/preserveinventory/src ./preserveinventory/src
 RUN ./gradlew jar
-RUN rm ./*/build/libs/*-reobf.jar
 
 FROM eclipse-temurin:21 AS build
 ENV LANG=ja_JP.UTF-8
