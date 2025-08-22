@@ -80,14 +80,24 @@ func FindSnapshots(watchDir string) ([]SnapshotInfo, error) {
 	return snapshots, nil
 }
 
-func FindLatestParent(snapshots []SnapshotInfo) *SnapshotInfo {
-	// Find the most recent FULL backup with .done file
-	for i := len(snapshots) - 1; i >= 0; i-- {
-		if snapshots[i].HasDone && snapshots[i].BackupType == "full" {
-			return &snapshots[i]
-		}
-	}
-	return nil
+// FindLatestFullParent returns the most recent FULL backup with a .done file
+func FindLatestFullParent(snapshots []SnapshotInfo) *SnapshotInfo {
+    for i := len(snapshots) - 1; i >= 0; i-- {
+        if snapshots[i].HasDone && snapshots[i].BackupType == "full" {
+            return &snapshots[i]
+        }
+    }
+    return nil
+}
+
+// FindLatestDoneSnapshot returns the most recent completed snapshot (full or incremental)
+func FindLatestDoneSnapshot(snapshots []SnapshotInfo) *SnapshotInfo {
+    for i := len(snapshots) - 1; i >= 0; i-- {
+        if snapshots[i].HasDone {
+            return &snapshots[i]
+        }
+    }
+    return nil
 }
 
 func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool {
@@ -96,24 +106,20 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 		return true
 	}
 	
-	// Metrics since the last full backup
-	incrementalCount := 0
-	var lastIncrementalSize int64 = 0
-	var cumulativeIncrementalSize int64 = 0
+    // Metrics since the last full backup
+    incrementalCount := 0
+    var cumulativeIncrementalSize int64 = 0
 	for i := len(snapshots) - 1; i >= 0; i-- {
 		snapshot := &snapshots[i]
 		if snapshot.HasDone && snapshot.BackupType == "full" {
 			// Found a full backup, stop counting
 			break
 		}
-		if snapshot.HasDone && snapshot.BackupType == "incremental" {
-			incrementalCount++
-			cumulativeIncrementalSize += snapshot.Size
-			if lastIncrementalSize == 0 {
-				lastIncrementalSize = snapshot.Size
-			}
-		}
-	}
+        if snapshot.HasDone && snapshot.BackupType == "incremental" {
+            incrementalCount++
+            cumulativeIncrementalSize += snapshot.Size
+        }
+        }
 	
 	// Check if the latest snapshot is a full backup
 	for i := len(snapshots) - 1; i >= 0; i-- {
@@ -132,17 +138,7 @@ func ShouldCreateFullBackup(parent *SnapshotInfo, snapshots []SnapshotInfo) bool
 		return true
 	}
 	
-	// If last incremental size is more than 1/4 of the full backup size,
-	// create a new full backup
-	if lastIncrementalSize > 0 && parent.Size > 0 {
-		if lastIncrementalSize > parent.Size/4 {
-			log.Printf("Creating full backup due to large incremental size: last incremental = %d bytes (%.2f MB), parent full = %d bytes (%.2f MB), ratio = %.2f%%",
-				lastIncrementalSize, float64(lastIncrementalSize)/1024/1024,
-				parent.Size, float64(parent.Size)/1024/1024,
-				float64(lastIncrementalSize)*100/float64(parent.Size))
-			return true
-		}
-	}
+    // Removed: threshold based on last incremental size vs full size.
 	
 	// If cumulative incremental size since the last full exceeds the size of the last full,
 	// the next backup should be a full backup
@@ -263,17 +259,35 @@ func DecideUpload(snapshotPath string, snapshots []SnapshotInfo, prefix string) 
     if !found {
         return "", nil, fmt.Errorf("current snapshot %q not found in snapshots list", snapshotPath)
     }
-    // Determine parent (latest full) and whether a new full is needed
-    parent := FindLatestParent(snapshots)
-    shouldCreateFull := ShouldCreateFullBackup(parent, snapshots)
+    // Determine the latest full for policy checks, and whether a new full is needed
+    latestFull := FindLatestFullParent(snapshots)
+    shouldCreateFull := ShouldCreateFullBackup(latestFull, snapshots)
 
     var parentName string
-    if shouldCreateFull || parent == nil {
+    var fromName string
+    var baseFullName string
+    if shouldCreateFull || latestFull == nil {
         parentPath = nil
         parentName = ""
+        fromName = ""
+        baseFullName = ""
     } else {
-        parentPath = &parent.Path
-        parentName = parent.Name
+        // Use the latest completed snapshot (incremental or full) as the parent
+        latestDone := FindLatestDoneSnapshot(snapshots)
+        if latestDone != nil {
+            parentPath = &latestDone.Path
+            parentName = latestDone.Name // immediate parent name
+            baseFullName = latestFull.Name
+            // If the parent itself is incremental, include source in key name
+            if latestDone.BackupType == "incremental" {
+                fromName = latestDone.Name
+            }
+        } else {
+            parentPath = nil
+            parentName = ""
+            fromName = ""
+            baseFullName = ""
+        }
     }
 
     // Inline GetSnapshotKey logic
@@ -281,7 +295,12 @@ func DecideUpload(snapshotPath string, snapshots []SnapshotInfo, prefix string) 
     if parentName == "" {
         key = fmt.Sprintf("backup/%s/full.zst", snapshotName)
     } else {
-        key = fmt.Sprintf("backup/%s/incremental.%s.zst", parentName, snapshotName)
+        // Use base full name as directory, and optionally include from.<source>
+        if fromName != "" {
+            key = fmt.Sprintf("backup/%s/incremental.%s.from.%s.zst", baseFullName, snapshotName, fromName)
+        } else {
+            key = fmt.Sprintf("backup/%s/incremental.%s.zst", baseFullName, snapshotName)
+        }
     }
     if prefix != "" {
         key = strings.TrimSuffix(prefix, "/") + "/" + key

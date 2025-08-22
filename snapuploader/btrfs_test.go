@@ -64,8 +64,9 @@ func TestDecideUpload_IncrementalWithParent(t *testing.T) {
     }
 }
 
-func TestDecideUpload_FullDueToLargeLastIncremental(t *testing.T) {
+func TestDecideUpload_NoLongerFullOnLargeLastIncremental(t *testing.T) {
     // Parent full with size 1000, last incremental 300 (> 1/4 of 1000)
+    // With new policy, this should still be incremental, not full.
     parent := SnapshotInfo{
         Path:       "/watch/snap-0001",
         Name:       "snap-0001",
@@ -87,18 +88,17 @@ func TestDecideUpload_FullDueToLargeLastIncremental(t *testing.T) {
     }
     snapshots := []SnapshotInfo{parent, lastIncr, current}
 
-    // New snapshot should be full according to ShouldCreateFullBackup
     snapPath := current.Path
     key, parentPath, err := DecideUpload(snapPath, snapshots, "")
     if err != nil {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if parentPath != nil {
-        t.Fatalf("expected parentPath to be nil for full backup, got %v", *parentPath)
+    if parentPath == nil || *parentPath != lastIncr.Path {
+        t.Fatalf("expected incremental with parent last incremental %q, got %v", lastIncr.Path, parentPath)
     }
 
-    expected := "backup/snap-0003/full.zst"
+    expected := "backup/snap-0001/incremental.snap-0003.from.snap-0002.zst"
     if key != expected {
         t.Fatalf("unexpected key: want %q, got %q", expected, key)
     }
@@ -202,8 +202,8 @@ func TestDecideUpload_SnapshotsIncludeCurrent_Incremental(t *testing.T) {
     }
 }
 
-func TestDecideUpload_SnapshotsIncludeCurrent_FullByPolicy(t *testing.T) {
-    // Parent full exists, last incremental large triggers full; snapshots include current
+func TestDecideUpload_SnapshotsIncludeCurrent_NoFullOnLargeIncremental(t *testing.T) {
+    // Parent full exists, last incremental large; with new policy, still incremental
     parent := SnapshotInfo{
         Path:       "/watch/snap-0001",
         Name:       "snap-0001",
@@ -229,10 +229,10 @@ func TestDecideUpload_SnapshotsIncludeCurrent_FullByPolicy(t *testing.T) {
     if err != nil {
         t.Fatalf("unexpected error: %v", err)
     }
-    if parentPath != nil {
-        t.Fatalf("expected full backup (nil parent), got %v", *parentPath)
+    if parentPath == nil || *parentPath != lastIncr.Path {
+        t.Fatalf("expected incremental (parent last incremental %q), got %v", lastIncr.Path, parentPath)
     }
-    expected := "backup/snap-0003/full.zst"
+    expected := "backup/snap-0001/incremental.snap-0003.from.snap-0002.zst"
     if key != expected {
         t.Fatalf("unexpected key: want %q, got %q", expected, key)
     }
@@ -265,10 +265,10 @@ func TestDecideUpload_ThirdBackupIncremental(t *testing.T) {
     if err != nil {
         t.Fatalf("unexpected error: %v", err)
     }
-    if parentPath == nil || *parentPath != parent.Path {
-        t.Fatalf("expected parentPath to be parent full %q, got %v", parent.Path, parentPath)
+    if parentPath == nil || *parentPath != incr1.Path {
+        t.Fatalf("expected parentPath to be last incremental %q, got %v", incr1.Path, parentPath)
     }
-    expected := "backup/snap-0001/incremental.snap-0003.zst"
+    expected := "backup/snap-0001/incremental.snap-0003.from.snap-0002.zst"
     if key != expected {
         t.Fatalf("unexpected key: want %q, got %q", expected, key)
     }
@@ -307,10 +307,18 @@ func TestDecideUpload_FullDueToCumulativeIncrementals(t *testing.T) {
         if err != nil {
             t.Fatalf("unexpected error at incr %d: %v", i+1, err)
         }
-        if parentPath == nil || *parentPath != parent.Path {
-            t.Fatalf("expected incremental with parent %q at incr %d, got %v", parent.Path, i+1, parentPath)
+        // Parent should be the latest done snapshot (the last element in prev)
+        lastDone := prev[len(prev)-1]
+        if parentPath == nil || *parentPath != lastDone.Path {
+            t.Fatalf("expected incremental with parent %q at incr %d, got %v", lastDone.Path, i+1, parentPath)
         }
-        expectedKey := "backup/" + parent.Name + "/incremental." + current.Name + ".zst"
+        // Directory should be base full name
+        baseDir := parent.Name
+        expectedKey := "backup/" + baseDir + "/incremental." + current.Name
+        if lastDone.BackupType == "incremental" {
+            expectedKey += ".from." + lastDone.Name
+        }
+        expectedKey += ".zst"
         if key != expectedKey {
             t.Fatalf("unexpected key at incr %d: want %q, got %q", i+1, expectedKey, key)
         }
