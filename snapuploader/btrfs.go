@@ -234,20 +234,57 @@ func CreateDoneFile(snapshotPath string, backupType string, size int64) error {
 	return nil
 }
 
-func GetSnapshotKey(snapshotName string, parentName string, prefix string) string {
-	var key string
-	
-	if parentName == "" {
-		// Full backup: backup/<name>/full.zst
-		key = fmt.Sprintf("backup/%s/full.zst", snapshotName)
-	} else {
-		// Incremental backup: backup/<parent>/incremental.<name>.zst
-		key = fmt.Sprintf("backup/%s/incremental.%s.zst", parentName, snapshotName)
-	}
-	
-	if prefix != "" {
-		key = strings.TrimSuffix(prefix, "/") + "/" + key
-	}
-	
-	return key
+
+// DecideUpload determines how to upload the given snapshot based on
+// existing snapshots. It returns the S3 key, backup type ("full" or
+// "incremental"), the parent path if incremental, and the parent name.
+//
+// Inputs:
+// - snapshotPath: the full path to the current snapshot directory
+// - snapshots: the result of FindSnapshots for the watch directory
+// - prefix: the snapshot prefix to be used for S3 key generation
+//
+// Outputs:
+// - key: the S3 object key to upload to
+// - parentPath: path to parent snapshot when incremental; nil for full
+// - error when snapshots is empty
+func DecideUpload(snapshotPath string, snapshots []SnapshotInfo, prefix string) (key string, parentPath *string, err error) {
+    if len(snapshots) == 0 {
+        return "", nil, fmt.Errorf("no snapshots found to decide upload plan")
+    }
+    // Ensure the provided snapshotPath exists in the snapshots list
+    found := false
+    for i := range snapshots {
+        if snapshots[i].Path == snapshotPath {
+            found = true
+            break
+        }
+    }
+    if !found {
+        return "", nil, fmt.Errorf("current snapshot %q not found in snapshots list", snapshotPath)
+    }
+    // Determine parent (latest full) and whether a new full is needed
+    parent := FindLatestParent(snapshots)
+    shouldCreateFull := ShouldCreateFullBackup(parent, snapshots)
+
+    var parentName string
+    if shouldCreateFull || parent == nil {
+        parentPath = nil
+        parentName = ""
+    } else {
+        parentPath = &parent.Path
+        parentName = parent.Name
+    }
+
+    // Inline GetSnapshotKey logic
+    snapshotName := filepath.Base(snapshotPath)
+    if parentName == "" {
+        key = fmt.Sprintf("backup/%s/full.zst", snapshotName)
+    } else {
+        key = fmt.Sprintf("backup/%s/incremental.%s.zst", parentName, snapshotName)
+    }
+    if prefix != "" {
+        key = strings.TrimSuffix(prefix, "/") + "/" + key
+    }
+    return key, parentPath, nil
 }

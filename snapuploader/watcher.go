@@ -135,37 +135,16 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 		return fmt.Errorf("failed to find snapshots: %w", err)
 	}
 
-	// Find parent snapshot (latest full backup)
-	parent := FindLatestParent(snapshots)
-	
-	// Determine if we should create a full backup
-	shouldCreateFull := ShouldCreateFullBackup(parent, snapshots)
-	
-	var parentPath *string
-	var parentName string
-	var backupType string
-	
-	if shouldCreateFull {
-		// Create full backup (no parent)
-		parentPath = nil
-		parentName = ""
-		backupType = "full"
-		log.Printf("Creating FULL backup (no parent)")
-	} else {
-		// Create incremental backup
-		if parent != nil {
-			parentPath = &parent.Path
-			parentName = parent.Name
-			backupType = "incremental"
-			log.Printf("Creating INCREMENTAL backup with parent: %s", parent.Name)
-		} else {
-			// Should not happen, but handle gracefully
-			parentPath = nil
-			parentName = ""
-			backupType = "full"
-			log.Printf("No parent found, creating FULL backup")
-		}
-	}
+    // Decide upload plan (S3 key, full/incremental, parent)
+    key, parentPath, derr := DecideUpload(snapshotPath, snapshots, dw.config.SnapshotPrefix)
+    if derr != nil {
+        return derr
+    }
+    if parentPath == nil {
+        log.Printf("Creating FULL backup (no parent)")
+    } else {
+        log.Printf("Creating INCREMENTAL backup with parent: %s", filepath.Base(*parentPath))
+    }
 
 	// Create btrfs send stream
 	btrfsCmd, btrfsOutput, err := CreateBtrfsSendDiff(snapshotPath, parentPath)
@@ -185,10 +164,7 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 	// Wrap with counting reader to measure size
 	countingReader := &CountingReader{reader: zstdOutput}
 
-	// Upload to S3
-	snapshotName := filepath.Base(snapshotPath)
-	key := GetSnapshotKey(snapshotName, parentName, dw.config.SnapshotPrefix)
-	
+    // Upload to S3
 	if err := dw.uploader.UploadStream(ctx, key, countingReader); err != nil {
 		btrfsCmd.Process.Kill()
 		zstdCmd.Process.Kill()
@@ -207,13 +183,18 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 	// Get the size that was uploaded
 	uploadedSize := countingReader.count
 
-	// Create .done file with backup type and size
-	if err := CreateDoneFile(snapshotPath, backupType, uploadedSize); err != nil {
-		return fmt.Errorf("failed to create .done file: %w", err)
-	}
+    // Create .done file with backup type and size
+    bt := "full"
+    if parentPath != nil {
+        bt = "incremental"
+    }
+    if err := CreateDoneFile(snapshotPath, bt, uploadedSize); err != nil {
+        return fmt.Errorf("failed to create .done file: %w", err)
+    }
 
-	log.Printf("Successfully processed snapshot: %s -> %s (type: %s, size: %d bytes)", 
-		snapshotName, key, backupType, uploadedSize)
+	snapshotName := filepath.Base(snapshotPath)
+    log.Printf("Successfully processed snapshot: %s -> %s (type: %s, size: %d bytes)", 
+        snapshotName, key, bt, uploadedSize)
 	return nil
 }
 
