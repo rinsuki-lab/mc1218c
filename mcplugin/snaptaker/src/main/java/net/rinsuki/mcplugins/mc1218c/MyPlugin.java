@@ -73,14 +73,17 @@ public class MyPlugin extends JavaPlugin implements Listener {
     void makeSnapshot(CommandSender sender) {
         Server server = getServer();
         long currentTick = server.getWorld("world").getGameTime();
-        // save every world
+        // save every world and measure time
+        long saveStartNs = System.nanoTime();
         for (World world : server.getWorlds()) {
             world.save(true);
         }
+        long saveElapsedMs = (System.nanoTime() - saveStartNs) / 1_000_000L;
         String name = "gt" + currentTick;
         
         try {
             // connect to @snapshot.sock
+            long snapshotStartNs = System.nanoTime();
             SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX);
             socket.connect(UnixDomainSocketAddress.of("/run/snapshotter/snapshot.sock"));
             
@@ -104,6 +107,7 @@ public class MyPlugin extends JavaPlugin implements Listener {
             
             // close socket
             socket.close();
+            long snapshotElapsedMs = (System.nanoTime() - snapshotStartNs) / 1_000_000L;
 
             String res = response.toString();
             
@@ -111,9 +115,9 @@ public class MyPlugin extends JavaPlugin implements Listener {
                 getLogger().info("Response: " + res);
             }
             if (res.startsWith("SUCCESS: ")) {
-                sender.sendMessage("Snapshot created: " + res);
+                sender.sendMessage("Snapshot created: " + res + String.format(" (save: %dms, snapshot: %dms)", saveElapsedMs, snapshotElapsedMs));
                 // Broadcast to all players after snapshot creation
-                getServer().broadcast(Component.text("バックアップを作成しました: " + name));
+                getServer().broadcast(Component.text(String.format("バックアップを作成しました: %s (保存: %dms, スナップショット: %dms)", name, saveElapsedMs, snapshotElapsedMs)));
                 // If someone left within the last minute, notify Discord via console
                 long now = System.currentTimeMillis();
                 if (lastPlayerQuitAtMillis > 0 && (now - lastPlayerQuitAtMillis) <= 60_000L) {
