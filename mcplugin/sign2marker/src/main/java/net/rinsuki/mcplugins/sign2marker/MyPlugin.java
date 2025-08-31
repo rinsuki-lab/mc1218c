@@ -310,8 +310,8 @@ public class MyPlugin extends JavaPlugin implements Listener {
 
         // 3) 最終更新者のプレーヤー名と現実時間 (JST)
         sb.append("<div style=\"margin-top:2px;color:#888\">");
-        sb.append("最終更新: ").append(htmlEscape(playerName)).append(" (").append(playerUuid).append(") ");
-        sb.append(htmlEscape(timeFormatter.format(ts))).append(" (JST)");
+        sb.append("最終更新: ").append(htmlEscape(playerName));
+        sb.append(" @ ").append(htmlEscape(timeFormatter.format(ts)));
         sb.append("</div>");
         sb.append("</div>");
         return sb.toString();
