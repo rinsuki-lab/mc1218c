@@ -74,6 +74,13 @@ public class MyPlugin extends JavaPlugin implements Listener {
 
         if (isPoi) {
             List<String> desc = extractDescription(lines);
+            // 無変更スキップ: すでに保存済みの内容と完全一致なら更新・通知しない
+            if (existed) {
+                List<String> stored = loadStoredDescriptionTrimmed(loc);
+                if (stored.equals(desc)) {
+                    return; // 内容に変更なし
+                }
+            }
             Player player = event.getPlayer();
             String playerName = player != null ? player.getName() : "unknown";
             UUID playerUuid = player != null ? player.getUniqueId() : new UUID(0, 0);
@@ -289,6 +296,26 @@ public class MyPlugin extends JavaPlugin implements Listener {
     private Optional<String> firstNonEmpty(List<String> list) {
         for (String s : list) if (s != null && !s.isEmpty()) return Optional.of(s);
         return Optional.empty();
+    }
+
+    private List<String> loadStoredDescriptionTrimmed(Location loc) {
+        File f = getChunkFile(loc);
+        if (!f.exists()) return Collections.emptyList();
+        YamlConfiguration yml = YamlConfiguration.loadConfiguration(f);
+        String base = "markers." + coordKey(loc);
+        if (!yml.contains(base)) return Collections.emptyList();
+        List<String> list = yml.getStringList(base + ".text");
+        return trimTrailingEmpty(list);
+    }
+
+    private List<String> trimTrailingEmpty(List<String> in) {
+        if (in == null || in.isEmpty()) return Collections.emptyList();
+        List<String> out = new ArrayList<>(in);
+        for (int i = out.size() - 1; i >= 0; i--) {
+            String s = out.get(i);
+            if (s == null || s.isEmpty()) out.remove(i); else break;
+        }
+        return out;
     }
 
     private String buildDetailHtml(List<String> descriptionLines, String playerName, UUID playerUuid, Location loc, Instant ts) {
