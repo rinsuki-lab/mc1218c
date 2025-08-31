@@ -91,14 +91,15 @@ func (dw *DirectoryWatcher) handleEvent(ctx context.Context, event fsnotify.Even
 			return
 		}
 
-		// Wait a bit for the snapshot to be fully created
-		time.Sleep(5 * time.Second)
+        // Wait a bit for the snapshot to be fully created
+        time.Sleep(5 * time.Second)
 
-		// Process the new snapshot
-		if err := dw.processSnapshot(ctx, event.Name); err != nil {
-			log.Printf("Error processing snapshot %s: %v", event.Name, err)
-		}
-	}
+        // Instead of only uploading the created snapshot, process all
+        // snapshots that are not yet uploaded (.done missing)
+        if err := dw.processExistingSnapshots(ctx); err != nil {
+            log.Printf("Error processing pending snapshots after new event %s: %v", event.Name, err)
+        }
+    }
 }
 
 func (dw *DirectoryWatcher) processExistingSnapshots(ctx context.Context) error {
