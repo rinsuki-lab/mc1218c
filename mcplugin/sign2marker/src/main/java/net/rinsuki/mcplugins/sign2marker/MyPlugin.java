@@ -155,7 +155,7 @@ public class MyPlugin extends JavaPlugin implements Listener {
         return yml.contains("markers." + coordKey(loc));
     }
 
-    private void saveMarkerToYaml(Location loc, List<String> descriptionLines, String playerName, UUID playerUuid) {
+    private void saveMarkerToYaml(Location loc, List<String> descriptionLines, String playerName, UUID playerUuid, Instant ts) {
         File f = getChunkFile(loc);
         YamlConfiguration yml = f.exists() ? YamlConfiguration.loadConfiguration(f) : new YamlConfiguration();
 
@@ -166,6 +166,8 @@ public class MyPlugin extends JavaPlugin implements Listener {
         yml.set(base + ".text", descriptionLines);
         yml.set(base + ".lastEditor.name", playerName);
         yml.set(base + ".lastEditor.uuid", playerUuid.toString());
+        // 保存時刻（エポックミリ秒）を永続化
+        yml.set(base + ".lastEditor.time", ts.toEpochMilli());
         try {
             yml.save(f);
         } catch (IOException e) {
@@ -190,7 +192,7 @@ public class MyPlugin extends JavaPlugin implements Listener {
     // -------------------- BlueMap integration --------------------
 
     private void upsertMarker(Location loc, List<String> descriptionLines, String playerName, UUID playerUuid, Instant now) {
-        saveMarkerToYaml(loc, descriptionLines, playerName, playerUuid);
+        saveMarkerToYaml(loc, descriptionLines, playerName, playerUuid, now);
 
         BlueMapAPI.getInstance().ifPresent(api -> applyToWorldMaps(api, loc.getWorld(), map -> {
             MarkerSet set = map.getMarkerSets().computeIfAbsent(MARKER_SET_ID, k -> new MarkerSet(MARKER_SET_LABEL));
@@ -255,8 +257,9 @@ public class MyPlugin extends JavaPlugin implements Listener {
                     try { uuid = UUID.fromString(uuidStr); } catch (Exception e) { uuid = new UUID(0, 0); }
 
                     Location loc = new Location(world, x, y, z);
-                    // Use file's lastModified as a best-effort timestamp for reloads
-                    Instant ts = Instant.ofEpochMilli(cf.lastModified());
+                    // 保存済みの編集時刻を優先し、なければファイル更新時刻をフォールバック
+                    long savedMs = yml.getLong(base + ".lastEditor.time", cf.lastModified());
+                    Instant ts = Instant.ofEpochMilli(savedMs);
                     upsertMarker(loc, desc, name, uuid, ts);
                 }
             }
