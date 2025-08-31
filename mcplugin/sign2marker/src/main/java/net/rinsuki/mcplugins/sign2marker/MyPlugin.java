@@ -323,7 +323,12 @@ public class MyPlugin extends JavaPlugin implements Listener {
             catch (NumberFormatException e) { continue; }
             Location loc = new Location(world, x, y, z);
             if (!(loc.getBlock().getState() instanceof Sign)) {
-                removeMarker(loc); // YAMLとBlueMapの両方から削除し、通知も行う
+                removeMarker(loc); // YAMLとBlueMapの両方から削除
+                // チャンク読み込み時のクリーンアップでも通知を出す (README 準拠)
+                broadcast(String.format(
+                        "Sign2Marker: %s (%d, %d, %d) の看板が見つからなかったため、マーカーを削除しました。",
+                        world.getName(), x, y, z
+                ));
             }
         }
     }
