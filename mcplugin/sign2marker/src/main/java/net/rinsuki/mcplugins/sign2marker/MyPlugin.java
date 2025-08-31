@@ -16,8 +16,10 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.block.SignChangeEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.configuration.file.YamlConfiguration;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -124,6 +126,27 @@ public class MyPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onEntityExplode(EntityExplodeEvent event) {
         handleExplodedBlocks(event.blockList(), "爆発");
+    }
+
+    @EventHandler
+    public void onBlockPhysics(BlockPhysicsEvent event) {
+        // 看板が支持ブロック消失などで物理的に壊れたケースを検知
+        org.bukkit.block.Block b = event.getBlock();
+        if (!(b.getState() instanceof Sign)) return; // 物理対象が看板以外は無視
+        Location loc = b.getLocation();
+        // 次のtickで実ブロック状態を確認し、看板でなければ削除
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (loc.getWorld() == null) return;
+            World w = loc.getWorld();
+            int cx = loc.getBlockX() >> 4;
+            int cz = loc.getBlockZ() >> 4;
+            if (!w.isChunkLoaded(cx, cz)) return; // チャンク未ロードなら何もしない（後続のChunkLoadEventで整合）
+            if (loc.getBlock().getState() instanceof Sign) return; // まだ看板なら何もしない
+            if (!hasStoredMarkerAt(loc)) return; // マーカー未登録
+            removeMarker(loc);
+            broadcast(String.format("Sign2Marker: %s (%d, %d, %d) の看板が壊れたため、マーカーを削除しました。",
+                    loc.getWorld().getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()));
+        });
     }
 
     private void handleExplodedBlocks(List<org.bukkit.block.Block> blocks, String reason) {
@@ -264,11 +287,43 @@ public class MyPlugin extends JavaPlugin implements Listener {
                     try { uuid = UUID.fromString(uuidStr); } catch (Exception e) { uuid = new UUID(0, 0); }
 
                     Location loc = new Location(world, x, y, z);
+                    // 起動時クリーンアップ: チャンクが読み込み済みかつ看板が存在しない場合に限りYAML削除
+                    int cx = x >> 4; int cz = z >> 4;
+                    if (world.isChunkLoaded(cx, cz)) {
+                        if (!(loc.getBlock().getState() instanceof Sign)) {
+                            removeMarkerFromYaml(loc);
+                            continue;
+                        }
+                    }
                     // 保存済みの編集時刻を優先し、なければファイル更新時刻をフォールバック
                     long savedMs = yml.getLong(base + ".lastEditor.time", cf.lastModified());
                     Instant ts = Instant.ofEpochMilli(savedMs);
                     upsertMarker(loc, desc, name, uuid, ts);
                 }
+            }
+        }
+    }
+
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent event) {
+        World world = event.getWorld();
+        int cx = event.getChunk().getX();
+        int cz = event.getChunk().getZ();
+        File worldDir = new File(new File(getDataFolder(), "markers"), world.getName());
+        File cf = new File(worldDir, String.format("chunk.%d.%d.yaml", cx, cz));
+        if (!cf.exists()) return;
+        YamlConfiguration yml = YamlConfiguration.loadConfiguration(cf);
+        if (!yml.isConfigurationSection("markers")) return;
+        Set<String> keys = new HashSet<>(Objects.requireNonNull(yml.getConfigurationSection("markers")).getKeys(false));
+        for (String key : keys) {
+            String[] parts = key.split(",");
+            if (parts.length != 3) continue;
+            int x, y, z;
+            try { x = Integer.parseInt(parts[0]); y = Integer.parseInt(parts[1]); z = Integer.parseInt(parts[2]); }
+            catch (NumberFormatException e) { continue; }
+            Location loc = new Location(world, x, y, z);
+            if (!(loc.getBlock().getState() instanceof Sign)) {
+                removeMarker(loc); // YAMLとBlueMapの両方から削除し、通知も行う
             }
         }
     }
