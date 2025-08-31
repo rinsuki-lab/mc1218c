@@ -10,6 +10,8 @@ ln -s /minecraft/{rot/,}plugins/DiscordSRV
 ln -s /minecraft/{rot/,}plugins/BlueMap
 mkdir /minecraft/plugins/PreserveInventory
 ln -s /minecraft/{rw/,}plugins/PreserveInventory/players
+mkdir /minecraft/plugins/Sign2Marker
+ln -s /minecraft/{rw/,}plugins/Sign2Marker/markers
 ln -s /minecraft/{rot/,}config
 ln -s /minecraft/{ro/,}bukkit.yml
 ln -s /minecraft/{ro/,}commands.yml

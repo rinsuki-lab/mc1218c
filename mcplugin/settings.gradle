@@ -12,4 +12,4 @@ plugins {
 
 rootProject.name = 'mcplugin'
 
-include 'snaptaker', 'preserveinventory'
+include 'snaptaker', 'preserveinventory', 'sign2marker'

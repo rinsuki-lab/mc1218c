@@ -1,0 +1,8 @@
+name: Sign2Marker
+version: 1.0.0
+main: net.rinsuki.mcplugins.sign2marker.MyPlugin
+description: make bluemap marker(s) from the in-game sign!
+author: rinsuki
+website: https://github.com/rinsuki-lab/mc1218c
+api-version: '1.21.8'
+depend: [BlueMap]
