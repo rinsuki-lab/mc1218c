@@ -49,9 +49,13 @@ public class MyPlugin extends JavaPlugin implements Listener {
         Bukkit.getPluginManager().registerEvents(this, this);
 
         // When BlueMap becomes available, (re)load all stored markers
+        // Ensure we run on the server main thread before touching blocks/world
         BlueMapAPI.onEnable(api -> {
-            getLogger().info("BlueMap detected; loading saved markers...");
-            loadAllStoredMarkersToBlueMap(api);
+            getLogger().info("BlueMap detected; scheduling saved markers load...");
+            Bukkit.getScheduler().runTask(this, () -> {
+                getLogger().info("Loading saved markers onto BlueMap...");
+                loadAllStoredMarkersToBlueMap(api);
+            });
         });
     }
 
