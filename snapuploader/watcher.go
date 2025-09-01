@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -54,7 +55,8 @@ func (dw *DirectoryWatcher) Start(ctx context.Context) error {
 
 	// Process existing snapshots on startup
 	if err := dw.processExistingSnapshots(ctx); err != nil {
-		log.Printf("Error processing existing snapshots: %v", err)
+		// Propagate error so main can handle fatal exit
+		return err
 	}
 
 	// Start watching for new events
@@ -91,15 +93,19 @@ func (dw *DirectoryWatcher) handleEvent(ctx context.Context, event fsnotify.Even
 			return
 		}
 
-        // Wait a bit for the snapshot to be fully created
-        time.Sleep(5 * time.Second)
+		// Wait a bit for the snapshot to be fully created
+		time.Sleep(5 * time.Second)
 
-        // Instead of only uploading the created snapshot, process all
-        // snapshots that are not yet uploaded (.done missing)
-        if err := dw.processExistingSnapshots(ctx); err != nil {
-            log.Printf("Error processing pending snapshots after new event %s: %v", event.Name, err)
-        }
-    }
+		// Instead of only uploading the created snapshot, process all
+		// snapshots that are not yet uploaded (.done missing)
+		if err := dw.processExistingSnapshots(ctx); err != nil {
+			if errors.Is(err, ErrS3Upload) {
+				log.Printf("S3 error detected while processing snapshots; exiting: %v", err)
+				os.Exit(1)
+			}
+			log.Printf("Error processing pending snapshots after new event %s: %v", event.Name, err)
+		}
+	}
 }
 
 func (dw *DirectoryWatcher) processExistingSnapshots(ctx context.Context) error {
@@ -112,6 +118,10 @@ func (dw *DirectoryWatcher) processExistingSnapshots(ctx context.Context) error 
 		if !snapshot.HasDone {
 			log.Printf("Found unprocessed snapshot: %s", snapshot.Name)
 			if err := dw.processSnapshot(ctx, snapshot.Path); err != nil {
+				// Exit on S3-specific errors
+				if errors.Is(err, ErrS3Upload) {
+					return err
+				}
 				log.Printf("Error processing snapshot %s: %v", snapshot.Name, err)
 			}
 		}
@@ -136,16 +146,16 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 		return fmt.Errorf("failed to find snapshots: %w", err)
 	}
 
-    // Decide upload plan (S3 key, full/incremental, parent)
-    key, parentPath, derr := DecideUpload(snapshotPath, snapshots, dw.config.SnapshotPrefix)
-    if derr != nil {
-        return derr
-    }
-    if parentPath == nil {
-        log.Printf("Creating FULL backup (no parent)")
-    } else {
-        log.Printf("Creating INCREMENTAL backup with parent: %s", filepath.Base(*parentPath))
-    }
+	// Decide upload plan (S3 key, full/incremental, parent)
+	key, parentPath, derr := DecideUpload(snapshotPath, snapshots, dw.config.SnapshotPrefix)
+	if derr != nil {
+		return derr
+	}
+	if parentPath == nil {
+		log.Printf("Creating FULL backup (no parent)")
+	} else {
+		log.Printf("Creating INCREMENTAL backup with parent: %s", filepath.Base(*parentPath))
+	}
 
 	// Create btrfs send stream
 	btrfsCmd, btrfsOutput, err := CreateBtrfsSendDiff(snapshotPath, parentPath)
@@ -165,7 +175,7 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 	// Wrap with counting reader to measure size
 	countingReader := &CountingReader{reader: zstdOutput}
 
-    // Upload to S3
+	// Upload to S3
 	if err := dw.uploader.UploadStream(ctx, key, countingReader); err != nil {
 		btrfsCmd.Process.Kill()
 		zstdCmd.Process.Kill()
@@ -184,18 +194,18 @@ func (dw *DirectoryWatcher) processSnapshot(ctx context.Context, snapshotPath st
 	// Get the size that was uploaded
 	uploadedSize := countingReader.count
 
-    // Create .done file with backup type and size
-    bt := "full"
-    if parentPath != nil {
-        bt = "incremental"
-    }
-    if err := CreateDoneFile(snapshotPath, bt, uploadedSize); err != nil {
-        return fmt.Errorf("failed to create .done file: %w", err)
-    }
+	// Create .done file with backup type and size
+	bt := "full"
+	if parentPath != nil {
+		bt = "incremental"
+	}
+	if err := CreateDoneFile(snapshotPath, bt, uploadedSize); err != nil {
+		return fmt.Errorf("failed to create .done file: %w", err)
+	}
 
 	snapshotName := filepath.Base(snapshotPath)
-    log.Printf("Successfully processed snapshot: %s -> %s (type: %s, size: %d bytes)", 
-        snapshotName, key, bt, uploadedSize)
+	log.Printf("Successfully processed snapshot: %s -> %s (type: %s, size: %d bytes)", 
+		snapshotName, key, bt, uploadedSize)
 	return nil
 }
 

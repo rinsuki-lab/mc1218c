@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -19,6 +20,9 @@ type S3Uploader struct {
 	bucket   string
 }
 
+// ErrS3Upload is a sentinel error indicating S3 upload failures.
+var ErrS3Upload = fmt.Errorf("s3 upload error")
+
 func NewS3Uploader(cfg *Config) (*S3Uploader, error) {
 	awsCfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
@@ -27,6 +31,12 @@ func NewS3Uploader(cfg *Config) (*S3Uploader, error) {
 			"",
 		)),
 		config.WithRegion(cfg.S3Region),
+		// Configure AWS SDK retryer to retry up to 10 attempts
+		config.WithRetryer(func() aws.Retryer {
+			return retry.NewStandard(func(o *retry.StandardOptions) {
+				o.MaxAttempts = 10
+			})
+		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
@@ -39,7 +49,7 @@ func NewS3Uploader(cfg *Config) (*S3Uploader, error) {
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
 		// Configure uploader settings
 		u.PartSize = 16 * 1024 * 1024 // 16MB parts
-		u.Concurrency = 3             // 3 concurrent uploads
+		u.Concurrency = 3			 // 3 concurrent uploads
 	})
 
 	return &S3Uploader{
@@ -54,7 +64,7 @@ func (u *S3Uploader) Upload(ctx context.Context, key string, reader io.Reader, c
 
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(u.bucket),
-		Key:    aws.String(key),
+		Key:	aws.String(key),
 		Body:   reader,
 	}
 
@@ -65,7 +75,7 @@ func (u *S3Uploader) Upload(ctx context.Context, key string, reader io.Reader, c
 	// Use the upload manager for better handling of streams
 	_, err := u.uploader.Upload(ctx, input)
 	if err != nil {
-		return fmt.Errorf("failed to upload to S3: %w", err)
+		return fmt.Errorf("%w: %v", ErrS3Upload, err)
 	}
 
 	log.Printf("Successfully uploaded to s3://%s/%s", u.bucket, key)
