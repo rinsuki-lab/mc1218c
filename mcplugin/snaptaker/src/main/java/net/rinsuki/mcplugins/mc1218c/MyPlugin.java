@@ -120,66 +120,81 @@ public class MyPlugin extends JavaPlugin implements Listener {
     void makeSnapshot(CommandSender sender) {
         Server server = getServer();
         long currentTick = server.getWorld("world").getGameTime();
-        // save every world and measure time
+
+        // Disable autosave before manual save
+        for (World world : server.getWorlds()) {
+            world.setAutoSave(false);
+        }
+
+        // Save every world and measure time (sync on main thread)
         long saveStartNs = System.nanoTime();
         for (World world : server.getWorlds()) {
             world.save(true);
         }
         long saveElapsedMs = (System.nanoTime() - saveStartNs) / 1_000_000L;
         String name = "gt" + currentTick;
-        
-        try {
-            // connect to @snapshot.sock
-            long snapshotStartNs = System.nanoTime();
-            SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX);
-            socket.connect(UnixDomainSocketAddress.of("/run/snapshotter/snapshot.sock"));
-            
-            // send the name to the socket
-            ByteBuffer nameBuffer = ByteBuffer.wrap(name.getBytes(StandardCharsets.UTF_8));
-            while (nameBuffer.hasRemaining()) {
-                socket.write(nameBuffer);
-            }
-            
-            // close send (shutdown output)
-            socket.shutdownOutput();
-            
-            // read until eof
-            ByteBuffer readBuffer = ByteBuffer.allocate(1024);
-            StringBuilder response = new StringBuilder();
-            while (socket.read(readBuffer) != -1) {
-                readBuffer.flip();
-                response.append(StandardCharsets.UTF_8.decode(readBuffer));
-                readBuffer.clear();
-            }
-            
-            // close socket
-            socket.close();
-            long snapshotElapsedMs = (System.nanoTime() - snapshotStartNs) / 1_000_000L;
+        getServer().broadcast(Component.text(String.format("バックアップ用の保存が完了しました (%dms)", saveElapsedMs)));
 
-            String res = response.toString();
-            
-            if (res.length() > 0) {
-                getLogger().info("Response: " + res);
-            }
-            if (res.startsWith("SUCCESS: ")) {
-                sender.sendMessage("Snapshot created: " + res + String.format(" (save: %dms, snapshot: %dms)", saveElapsedMs, snapshotElapsedMs));
-                // Broadcast to all players after snapshot creation
-                getServer().broadcast(Component.text(String.format("バックアップを作成しました: %s (保存: %dms, スナップショット: %dms)", name, saveElapsedMs, snapshotElapsedMs)));
-                // If someone left within the last minute, notify Discord via console
-                long now = System.currentTimeMillis();
-                if (lastPlayerQuitAtMillis > 0 && (now - lastPlayerQuitAtMillis) <= 60_000L) {
-                    Bukkit.dispatchCommand(server.getConsoleSender(), "discord broadcast 朝が来ました");
-                    // Reset to avoid duplicate notifications for the same quit
-                    lastPlayerQuitAtMillis = -1;
+        // Run the snapshot in background, then re-enable autosave when done
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            boolean success = false;
+            String responseText = "";
+            long snapshotElapsedMs = -1;
+            try {
+                long snapshotStartNs = System.nanoTime();
+                SocketChannel socket = SocketChannel.open(StandardProtocolFamily.UNIX);
+                socket.connect(UnixDomainSocketAddress.of("/run/snapshotter/snapshot.sock"));
+
+                ByteBuffer nameBuffer = ByteBuffer.wrap(name.getBytes(StandardCharsets.UTF_8));
+                while (nameBuffer.hasRemaining()) {
+                    socket.write(nameBuffer);
                 }
-            } else {
-                sender.sendMessage("Snapshot creation failed");
+
+                socket.shutdownOutput();
+
+                ByteBuffer readBuffer = ByteBuffer.allocate(1024);
+                StringBuilder response = new StringBuilder();
+                while (socket.read(readBuffer) != -1) {
+                    readBuffer.flip();
+                    response.append(StandardCharsets.UTF_8.decode(readBuffer));
+                    readBuffer.clear();
+                }
+
+                socket.close();
+                snapshotElapsedMs = (System.nanoTime() - snapshotStartNs) / 1_000_000L;
+
+                responseText = response.toString();
+                if (responseText.length() > 0) {
+                    getLogger().info("Response: " + responseText);
+                }
+                success = responseText.startsWith("SUCCESS: ");
+            } catch (IOException e) {
+                responseText = e.getMessage();
+                getLogger().severe("Snapshot creation failed: " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                long finalSnapshotElapsedMs = snapshotElapsedMs;
+                String finalResponseText = responseText;
+                boolean finalSuccess = success;
+                // Re-enable autosave and notify on the main thread
+                Bukkit.getScheduler().runTask(this, () -> {
+                    for (World world : server.getWorlds()) {
+                        world.setAutoSave(true);
+                    }
+                    if (finalSuccess) {
+                        sender.sendMessage("Snapshot created: " + finalResponseText + String.format(" (save: %dms, snapshot: %dms)", saveElapsedMs, finalSnapshotElapsedMs));
+                        getServer().broadcast(Component.text(String.format("バックアップを作成しました: %s (保存: %dms, スナップショット: %dms)", name, saveElapsedMs, finalSnapshotElapsedMs)));
+                        long now = System.currentTimeMillis();
+                        if (lastPlayerQuitAtMillis > 0 && (now - lastPlayerQuitAtMillis) <= 60_000L) {
+                            Bukkit.dispatchCommand(server.getConsoleSender(), "discord broadcast 朝が来ました");
+                            lastPlayerQuitAtMillis = -1;
+                        }
+                    } else {
+                        sender.sendMessage("Snapshot creation failed");
+                        getServer().broadcast(Component.text("バックアップの作成に失敗しました"));
+                    }
+                });
             }
-        } catch (IOException e) {
-            sender.sendMessage("Failed to create snapshot");
-            getLogger().severe("Snapshot creation failed: " + e.getMessage());
-            e.printStackTrace();
-            getServer().broadcast(Component.text("バックアップの作成に失敗しました"));
-        }
+        });
     }
 }
